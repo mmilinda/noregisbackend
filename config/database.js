@@ -1,20 +1,8 @@
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
-  try {
-    const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/registre_visiteurs';
-    
-    await mongoose.connect(mongoURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-
-    console.log('MongoDB connecté avec succès');
-    return mongoose;
-  } catch (error) {
-    console.error('Erreur de connexion MongoDB:', error.message);
-    process.exit(1);
-  }
+  await mongoose.connect(process.env.MONGODB_URI);
+  console.log('✅ MongoDB Atlas connectée');
 };
 
-module.exports = { connectDB, mongoose };
+module.exports = { connectDB };

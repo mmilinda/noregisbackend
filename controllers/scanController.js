@@ -1,111 +1,265 @@
 const Tesseract = require('tesseract.js');
 const { Document } = require('../models');
-const path = require('path');
-const fs   = require('fs');
 
-// ================================
-// SCANNER UNE IMAGE
-// ================================
 const scannerImage = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Aucune image reçue.',
+      });
+    }
+
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fichier invalide (image requise).',
+      });
     }
 
     const cheminFichier = req.file.path;
 
-    // Sauvegarder le document en base
     const document = await Document.create({
-      nomFichier:    req.file.filename,
-      cheminFichier: cheminFichier,
-      typeMime:      req.file.mimetype,
+      nomFichier: req.file.filename,
+      cheminFichier,
+      typeMime: req.file.mimetype,
       tailleFichier: req.file.size,
     });
 
-    // Lancer l'OCR avec Tesseract
-    console.log('🔍 OCR en cours...');
     const { data: { text } } = await Tesseract.recognize(
       cheminFichier,
-      'fra+eng', // Langue : français + anglais
-      { logger: () => {} }
+      'fra+eng',
+      {
+        logger: () => {},
+        tessedit_pageseg_mode: 6
+      }
     );
 
-    // Extraire les informations depuis le texte brut
+    console.log('📄 OCR RAW:\n', text);
+
     const infosExtraites = extraireInfosPiece(text);
 
     res.json({
       success: true,
       message: 'Scan terminé.',
       document: {
-        id:            document.id,
-        nomFichier:    document.nomFichier,
-        cheminFichier: document.cheminFichier,
+        id: document._id,
+        nomFichier: document.nomFichier,
       },
       infosExtraites,
-      texteRaw: text, // Pour debug si besoin
+      texteRaw: text,
     });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
 // ================================
-// EXTRACTION DES INFOS (regex)
+// NETTOYAGE
 // ================================
-const extraireInfosPiece = (texte) => {
-  const texteNormalise = texte.toUpperCase().replace(/\s+/g, ' ');
 
+const nettoyer = (str) => {
+  if (!str) return null;
+
+  return str
+    .replace(/["""«»]/g, '')
+    .replace(/,/g, ' ')
+    .replace(/[^a-zA-ZÀ-ÿ\-\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || null;
+};
+
+// ================================
+// EXTRACTION
+// ================================
+
+const extraireInfosPiece = (texte) => {
   const infos = {
-    nom:          null,
-    prenom:       null,
-    numeroPiece:  null,
-    typePiece:    null,
+    nom: null,
+    prenom: null,
+    numeroPiece: null,
+    typePiece: 'CNI',
     dateNaissance: null,
   };
 
-  // Détecter le type de pièce
-  if (texteNormalise.includes('PASSEPORT'))       infos.typePiece = 'PASSEPORT';
-  else if (texteNormalise.includes('PERMIS'))      infos.typePiece = 'PERMIS';
-  else if (texteNormalise.includes('CARTE NATIONALE') ||
-           texteNormalise.includes('CNI'))         infos.typePiece = 'CNI';
-  else                                             infos.typePiece = 'CNI';
+  // 🔥 NORMALISATION OCR
+  const texteClean = texte
+    .replace(/[|]/g, 'I')
+    .replace(/0/g, 'O')
+    .replace(/[\u2018\u2019]/g, "'");
 
-  // Extraire le numéro de pièce (format SN + chiffres ou lettres)
-  const regexNumero = /(?:N[°º]?|NO\.?|NUMBER)[\s:]*([A-Z0-9]{6,15})/i;
-  const matchNumero = texte.match(regexNumero);
-  if (matchNumero) infos.numeroPiece = matchNumero[1].trim();
+  const lignes = texteClean.split('\n').map(l => l.trim()).filter(Boolean);
+  const tUpper = texteClean.toUpperCase();
 
-  // Extraire la date de naissance
-  const regexDate = /(?:N[ÉE]{1,2}[\s(]*LE|DATE\s+DE\s+NAISSANCE|D\.O\.B)[\s:]*(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})/i;
-  const matchDate = texte.match(regexDate);
-  if (matchDate) {
-    const [jour, mois, annee] = matchDate[1].split(/[\/\-\.]/);
-    infos.dateNaissance = `${annee}-${mois}-${jour}`;
+  // ================================
+  // TYPE PIECE
+  // ================================
+  if (tUpper.includes('PASSEPORT')) infos.typePiece = 'PASSEPORT';
+  else if (tUpper.includes('PERMIS')) infos.typePiece = 'PERMIS';
+  else if (tUpper.includes('CARTE NATIONALE') || tUpper.includes('CNI')) infos.typePiece = 'CNI';
+
+  // ================================
+  // 🔥 NOM (SCORING INTELLIGENT)
+  // ================================
+  const blacklist = [
+    'REPUBLIQUE','FRANCAISE','CARTE','NATIONALE',
+    'IDENTITE','DOCUMENT','PASSEPORT','NOM','SEXE',
+    'SURNAME','GIVEN'
+  ];
+
+  const candidats = texteClean.match(/\b[A-ZÉÈÀÙÂÊÎÔÛÇ]{3,}\b/g) || [];
+
+  let meilleurNom = null;
+  let scoreMax = 0;
+
+  candidats.forEach(n => {
+    if (blacklist.includes(n)) return;
+
+    let score = 0;
+
+    // bonus longueur
+    score += n.length;
+
+    // bonus proximité mot NOM
+    if (texteClean.includes('NOM') && texteClean.indexOf(n) < texteClean.indexOf('NOM') + 150) {
+      score += 5;
+    }
+
+    // bonus si ressemble à un vrai nom (pas trop court)
+    if (n.length >= 4) score += 2;
+
+    if (score > scoreMax) {
+      scoreMax = score;
+      meilleurNom = n;
+    }
+  });
+
+  if (meilleurNom) {
+    infos.nom = nettoyer(meilleurNom);
   }
 
-  // Extraire NOM et PRÉNOM via lignes MRZ (Machine Readable Zone)
-  const lignesMRZ = texte.match(/[A-Z<]{20,}/g);
-  if (lignesMRZ && lignesMRZ.length >= 1) {
-    const ligneMRZ = lignesMRZ[0].replace(/</g, ' ').trim();
-    const parties  = ligneMRZ.split('  ').filter(Boolean);
-    if (parties.length >= 2) {
-      infos.nom    = parties[0].trim();
-      infos.prenom = parties[1].trim();
+  // ================================
+  // 🔥 PRÉNOM (STRICT APRES LABEL)
+  // ================================
+  let prenomTrouve = null;
+
+  for (let i = 0; i < lignes.length; i++) {
+    if (/Pr[ée]noms?|Given/i.test(lignes[i])) {
+
+      for (let j = 1; j <= 3; j++) {
+        let l = lignes[i + j];
+        if (!l) continue;
+
+        l = l
+          .replace(/^[^A-ZÀ-ÿ]+/, '')
+          .replace(/[0-9]/g, '')
+          .replace(/[-–—]+/g, ' ')
+          .replace(/,/g, ' ')
+          .trim();
+
+        const match = l.match(
+          /[A-ZÀ-ÿ][a-zà-ÿ]+(?:[\s\-][A-ZÀ-ÿ][a-zà-ÿ]+)*/g
+        );
+
+        if (match && match.join(' ').length > 3) {
+          prenomTrouve = match.join(' ');
+          break;
+        }
+      }
+    }
+
+    if (prenomTrouve) break;
+  }
+
+  if (prenomTrouve) {
+    infos.prenom = nettoyer(prenomTrouve);
+  }
+
+  // ================================
+  // NUMERO PIECE
+  // ================================
+  for (let i = 0; i < lignes.length; i++) {
+    if (/N[°º]\s*DU\s*DOCUMENT|Document\s*No/i.test(lignes[i])) {
+      for (let j = 0; j <= 4; j++) {
+        const ligne = lignes[i + j] || '';
+        const m = ligne.match(/\b([A-Z0-9]{6,15})\b/g);
+
+        if (m) {
+          const code = m.find(c =>
+            /[A-Z]/.test(c) && /[0-9]/.test(c)
+          );
+
+          if (code) {
+            infos.numeroPiece = code;
+            break;
+          }
+        }
+      }
+      if (infos.numeroPiece) break;
     }
   }
 
-  // Fallback : chercher NOM et PRÉNOM en clair
-  if (!infos.nom) {
-    const regexNom = /(?:NOM|SURNAME|NAME)[\s:]*([A-ZÉÈÀÙÂÊÎÔÛÇ\- ]+)/i;
-    const m = texte.match(regexNom);
-    if (m) infos.nom = m[1].trim();
+  if (!infos.numeroPiece) {
+    const m = texteClean.match(/\b([A-Z][A-Z0-9]{6,14})\b/g);
+
+    if (m) {
+      const code = m.find(c =>
+        /[A-Z]/.test(c) &&
+        /[0-9]/.test(c) &&
+        !blacklist.includes(c)
+      );
+
+      if (code) infos.numeroPiece = code;
+    }
   }
 
-  if (!infos.prenom) {
-    const regexPrenom = /(?:PRÉNOM|PRENOM|GIVEN NAME|FIRST NAME)[\s:]*([A-ZÉÈÀÙÂÊÎÔÛÇ\- ]+)/i;
-    const m = texte.match(regexPrenom);
-    if (m) infos.prenom = m[1].trim();
+  // ================================
+  // DATE NAISSANCE
+  // ================================
+  const d1 = texteClean.match(/\b(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})\b/);
+
+  if (d1) {
+    infos.dateNaissance = `${d1[3]}-${d1[2]}-${d1[1]}`;
   }
+
+  if (!infos.dateNaissance) {
+    const d2 = texteClean.match(/\b(\d{2})(\d{2})(\d{4})\b/);
+
+    if (d2) {
+      const [, j, m, a] = d2;
+      if (j <= 31 && m <= 12) {
+        infos.dateNaissance = `${a}-${m}-${j}`;
+      }
+    }
+  }
+
+  // ================================
+  // FALLBACK MRZ
+  // ================================
+  if (!infos.nom || !infos.prenom) {
+    const mrz = texteClean.match(/[A-Z<]{25,}/g);
+
+    if (mrz) {
+      const parts = mrz[0]
+        .replace(/</g, ' ')
+        .trim()
+        .split(/\s{2,}/)
+        .filter(Boolean);
+
+      if (!infos.nom && parts[0]) infos.nom = nettoyer(parts[0]);
+      if (!infos.prenom && parts[1]) infos.prenom = nettoyer(parts[1]);
+    }
+  }
+
+  // ================================
+  // VALIDATION MINIMALE
+  // ================================
+  if (infos.nom && infos.nom.length < 3) infos.nom = null;
+  if (infos.prenom && infos.prenom.length < 2) infos.prenom = null;
 
   return infos;
 };
