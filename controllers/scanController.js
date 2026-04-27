@@ -4,10 +4,7 @@ const { Document } = require('../models');
 const scannerImage = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'Aucune image reçue.',
-      });
+      return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
     }
 
     const cheminFichier = req.file.path;
@@ -22,10 +19,7 @@ const scannerImage = async (req, res) => {
     const { data: { text } } = await Tesseract.recognize(
       cheminFichier,
       'fra+eng',
-      {
-        logger: () => {},
-        tessedit_pageseg_mode: 6,
-      }
+      { logger: () => {}, tessedit_pageseg_mode: 6 }
     );
 
     console.log('📄 OCR RAW:\n', text);
@@ -35,29 +29,21 @@ const scannerImage = async (req, res) => {
     return res.json({
       success: true,
       message: 'Scan terminé.',
-      document: {
-        id: document._id,
-        nomFichier: document.nomFichier,
-      },
+      document: { id: document._id, nomFichier: document.nomFichier },
       infosExtraites,
       texteRaw: text,
     });
 
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // ================================
 // NETTOYAGE TEXTE
 // ================================
-
 const nettoyer = (str) => {
   if (!str) return null;
-
   return str
     .replace(/["""«»]/g, '')
     .replace(/,/g, ' ')
@@ -67,9 +53,50 @@ const nettoyer = (str) => {
 };
 
 // ================================
+// EXTRACTION DATE
+// ================================
+const extraireDate = (texte) => {
+  // Format DD/MM/YYYY ou DD-MM-YYYY
+  const d1 = texte.match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
+  if (d1) {
+    const j = +d1[1], m = +d1[2], a = +d1[3];
+    if (j >= 1 && j <= 31 && m >= 1 && m <= 12 && a >= 1900 && a <= 2100) {
+      return `${d1[3]}-${d1[2]}-${d1[1]}`;
+    }
+  }
+
+  // Format collé : 13071990 ou 28091990
+  const chiffres = texte.replace(/[^0-9]/g, ' ');
+  const all = chiffres.match(/\b\d{8}\b/g);
+  if (all) {
+    const valid = all.find(v => {
+      const j = +v.slice(0, 2), m = +v.slice(2, 4), a = +v.slice(4, 8);
+      return j >= 1 && j <= 31 && m >= 1 && m <= 12 && a >= 1900 && a <= 2100;
+    });
+    if (valid) return `${valid.slice(4, 8)}-${valid.slice(2, 4)}-${valid.slice(0, 2)}`;
+  }
+
+  return null;
+};
+
+// ================================
+// VALEUR APRES LABEL
+// ================================
+const valeurApresLabel = (lignes, regex, maxLignes = 3) => {
+  for (let i = 0; i < lignes.length; i++) {
+    if (regex.test(lignes[i])) {
+      for (let j = 1; j <= maxLignes; j++) {
+        const l = (lignes[i + j] || '').trim();
+        if (l && l.length > 1) return l;
+      }
+    }
+  }
+  return null;
+};
+
+// ================================
 // EXTRACTION PRINCIPALE
 // ================================
-
 const extraireInfosPiece = (texte) => {
   const infos = {
     nom: null,
@@ -79,201 +106,188 @@ const extraireInfosPiece = (texte) => {
     dateNaissance: null,
   };
 
-  // 🔥 NORMALISATION OCR
-  const texteClean = texte
-    .replace(/\|/g, '')
-    .replace(/0/g, 'O')
-    .replace(/[\u2018\u2019]/g, "'");
-
-  const lignes = texteClean.split('\n').map(l => l.trim()).filter(Boolean);
-  const upper = texteClean.toUpperCase();
+  const lignes = texte.split('\n').map(l => l.trim()).filter(Boolean);
+  const upper = texte.toUpperCase();
 
   // ================================
   // TYPE DE PIÈCE
   // ================================
   if (upper.includes('PASSEPORT')) infos.typePiece = 'PASSEPORT';
-  else if (upper.includes('PERMIS')) infos.typePiece = 'PERMIS';
-  else if (upper.includes('CARTE NATIONALE') || upper.includes('CNI')) infos.typePiece = 'CNI';
+  else if (upper.includes('PERMIS DE CONDUIRE')) infos.typePiece = 'PERMIS';
+  else if (upper.includes('CARTE D\'IDENTITE') || upper.includes('CARTE NATIONALE') || upper.includes('CEDEAO') || upper.includes('CNI')) infos.typePiece = 'CNI';
+  else if (upper.includes('SEJOUR')) infos.typePiece = 'CARTE_SEJOUR';
 
   // ================================
-  // 🔥 NOM
+  // DATE DE NAISSANCE
+  // Extraire AVANT toute normalisation
   // ================================
 
+  // Chercher ligne avec label "Date de naissance" ou "Date of birth"
+  for (let i = 0; i < lignes.length; i++) {
+    if (/date\s*de\s*naiss|date\s*of\s*birth/i.test(lignes[i])) {
+      // La date peut être sur la même ligne ou la suivante
+      const meme = lignes[i].match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
+      if (meme) {
+        infos.dateNaissance = `${meme[3]}-${meme[2]}-${meme[1]}`;
+        break;
+      }
+      for (let j = 1; j <= 3; j++) {
+        const d = extraireDate(lignes[i + j] || '');
+        if (d) { infos.dateNaissance = d; break; }
+      }
+      if (infos.dateNaissance) break;
+    }
+  }
+
+  // Fallback global sur tout le texte
+  if (!infos.dateNaissance) {
+    infos.dateNaissance = extraireDate(texte);
+  }
+
+  // ================================
+  // NORMALISATION OCR (après date)
+  // ================================
+  const texteClean = texte
+    .replace(/\|/g, 'I')
+    .replace(/[\u2018\u2019]/g, "'");
+
+  const lignesClean = texteClean.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // ================================
+  // NOM
+  // ================================
   const blacklist = new Set([
-    'REPUBLIQUE',
-    'FRANCAISE',
-    'CARTE',
-    'NATIONALE',
-    'IDENTITE',
-    'DOCUMENT',
-    'PASSEPORT',
-    'NOM',
-    'SEXE',
-    'NATIONALITE'
+    'REPUBLIQUE', 'FRANCAISE', 'FRANÇAISE', 'SENEGAL', 'SÉNÉGAL',
+    'CARTE', 'NATIONALE', 'IDENTITE', 'IDENTITÉ', 'DOCUMENT',
+    'PASSEPORT', 'NOM', 'SEXE', 'NATIONALITE', 'NATIONALITÉ',
+    'CEDEAO', 'ECOWAS', 'IDENTITY', 'CARD'
   ]);
 
-  let nom = null;
-
-  const ligneNom = lignes.find(l =>
-    /\b([A-ZÉÈÀÙÂÊÎÔÛÇ]{3,})\.\s?[A-Z]?/.test(l)
-  );
-
-  if (ligneNom) {
-    const m = ligneNom.match(/\b([A-ZÉÈÀÙÂÊÎÔÛÇ]{3,})/);
-    if (m && !blacklist.has(m[1])) nom = m[1];
+  // Chercher label "Nom" ou "Surname"
+  const nomLabel = valeurApresLabel(lignesClean, /^(Nom|Surname|Last\s*name)\s*[:\-]?\s*$/i);
+  if (nomLabel) {
+    const candidat = nomLabel.match(/\b[A-ZÉÈÀÙÂÊÎÔÛÇÑ]{2,}\b/);
+    if (candidat && !blacklist.has(candidat[0])) {
+      infos.nom = nettoyer(candidat[0]);
+    }
   }
 
-  if (!nom) {
-    const candidats = texteClean.match(/\b[A-ZÉÈÀÙÂÊÎÔÛÇ]{3,}\b/g) || [];
+  // Fallback : chercher inline "Nom : FALL"
+  if (!infos.nom) {
+    for (const l of lignesClean) {
+      const m = l.match(/^Nom\s*[:\-]?\s*([A-ZÉÈÀÙÂÊÎÔÛÇ]{2,})/i);
+      if (m && !blacklist.has(m[1].toUpperCase())) {
+        infos.nom = nettoyer(m[1]);
+        break;
+      }
+    }
+  }
 
-    let best = null;
-    let scoreMax = -999;
+  // Fallback scoring
+  if (!infos.nom) {
+    const candidats = texteClean.match(/\b[A-ZÉÈÀÙÂÊÎÔÛÇ]{3,}\b/g) || [];
+    let best = null, scoreMax = -999;
 
     candidats.forEach(c => {
-      if (blacklist.has(c)) return;
-
+      if (blacklist.has(c.toUpperCase())) return;
       let score = 0;
-
-      if (c.length >= 4 && c.length <= 12) score += 5;
-
+      if (c.length >= 3 && c.length <= 15) score += 5;
       const pos = texteClean.indexOf(c);
-      const posNom = texteClean.indexOf('NOM');
-
-      if (posNom !== -1 && pos > posNom && pos < posNom + 200) {
-        score += 5;
-      }
-
-      if (score > scoreMax) {
-        scoreMax = score;
-        best = c;
-      }
+      const posNom = texteClean.search(/\bNom\b/i);
+      if (posNom !== -1 && pos > posNom && pos < posNom + 100) score += 10;
+      if (score > scoreMax) { scoreMax = score; best = c; }
     });
 
-    nom = best;
+    if (best) infos.nom = nettoyer(best);
   }
 
-  if (nom) infos.nom = nettoyer(nom);
-
   // ================================
-  // 🔥 PRÉNOM
+  // PRÉNOM
   // ================================
 
-  let prenom = null;
+  // Chercher label "Prénoms" ou "Given names"
+  const prenomLabel = valeurApresLabel(lignesClean, /^(Pr[ée]noms?|Given\s*names?|Forename)\s*[:\-]?\s*$/i);
+  if (prenomLabel) {
+    infos.prenom = nettoyer(prenomLabel);
+  }
 
-  for (let i = 0; i < lignes.length; i++) {
-    if (/Pr[ée]noms?|Given/i.test(lignes[i])) {
+  // Fallback inline "Prénoms : AMINATA GUEYE"
+  if (!infos.prenom) {
+    for (const l of lignesClean) {
+      const m = l.match(/Pr[ée]noms?\s*[:\-]?\s*(.+)/i);
+      if (m) { infos.prenom = nettoyer(m[1]); break; }
+    }
+  }
 
-      for (let j = 1; j <= 3; j++) {
-        let l = lignes[i + j];
-        if (!l) continue;
-
-        l = l
-          .replace(/^[^A-ZÀ-ÿ]+/, '')
-          .replace(/[0-9]/g, '')
-          .replace(/[-–—]+/g, ' ')
-          .replace(/,/g, ' ')
-          .trim();
-
-        const m = l.match(
-          /[A-ZÀ-ÿ][a-zà-ÿ]+(?:[\s\-][A-ZÀ-ÿ][a-zà-ÿ]+)*/g
-        );
-
-        if (m && m.join(' ').length > 3) {
-          prenom = m.join(' ');
-          break;
+  // Fallback ancien algo
+  if (!infos.prenom) {
+    for (let i = 0; i < lignesClean.length; i++) {
+      if (/Pr[ée]noms?|Given/i.test(lignesClean[i])) {
+        for (let j = 1; j <= 3; j++) {
+          let l = lignesClean[i + j];
+          if (!l) continue;
+          l = l.replace(/^[^A-ZÀ-ÿ]+/, '').replace(/[0-9]/g, '').replace(/[-–—]+/g, ' ').replace(/,/g, ' ').trim();
+          const m = l.match(/[A-ZÀ-ÿ][a-zà-ÿ]+(?:[\s\-][A-ZÀ-ÿ][a-zà-ÿ]+)*/g);
+          if (m && m.join(' ').length > 2) { infos.prenom = nettoyer(m.join(' ')); break; }
         }
       }
+      if (infos.prenom) break;
     }
-
-    if (prenom) break;
   }
 
-  if (prenom) infos.prenom = nettoyer(prenom);
-
   // ================================
-  // 🔥 NUMERO DOCUMENT
+  // NUMERO DOCUMENT
   // ================================
 
-  for (let i = 0; i < lignes.length; i++) {
-    if (/N[°º]\s*DU\s*DOCUMENT|Document\s*No/i.test(lignes[i])) {
+  // Sénégal : "N° de la carte d'identité" → numéro sur la même ligne ou suivante
+  for (let i = 0; i < lignesClean.length; i++) {
+    if (/N[°º]\s*de\s*la\s*carte|carte\s*d.identit/i.test(lignesClean[i])) {
+      // Chercher sur la même ligne
+      const meme = lignesClean[i].match(/\b([A-Z0-9\s]{6,25})\b/g);
+      if (meme) {
+        const code = meme.find(c => /\d/.test(c) && c.trim().length >= 6);
+        if (code) { infos.numeroPiece = code.replace(/\s+/g, ''); break; }
+      }
+      // Chercher sur les lignes suivantes
+      for (let j = 1; j <= 3; j++) {
+        const l = lignesClean[i + j] || '';
+        const m = l.match(/[\d\s]{6,25}/);
+        if (m) { infos.numeroPiece = m[0].replace(/\s+/g, ''); break; }
+      }
+      if (infos.numeroPiece) break;
+    }
+  }
 
-      for (let j = 0; j <= 4; j++) {
-        const l = lignes[i + j] || '';
-        const m = l.match(/\b([A-Z0-9]{6,15})\b/g);
-
-        if (m) {
-          const code = m.find(c =>
-            /[A-Z]/.test(c) && /[0-9]/.test(c)
-          );
-
-          if (code) {
-            infos.numeroPiece = code;
-            break;
+  // France : "N° DU DOCUMENT"
+  if (!infos.numeroPiece) {
+    for (let i = 0; i < lignesClean.length; i++) {
+      if (/N[°º]\s*DU\s*DOCUMENT|Document\s*No/i.test(lignesClean[i])) {
+        for (let j = 0; j <= 4; j++) {
+          const l = lignesClean[i + j] || '';
+          const m = l.match(/\b([A-Z0-9]{6,15})\b/g);
+          if (m) {
+            const code = m.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c));
+            if (code) { infos.numeroPiece = code; break; }
           }
         }
+        if (infos.numeroPiece) break;
       }
     }
   }
 
+  // Fallback global
   if (!infos.numeroPiece) {
     const m = texteClean.match(/\b([A-Z][A-Z0-9]{6,14})\b/g);
-
-    if (m) {
-      infos.numeroPiece = m.find(c =>
-        /[A-Z]/.test(c) && /[0-9]/.test(c)
-      );
-    }
-  }
-
-  // ================================
-  // 🔥 DATE DE NAISSANCE (FIX FINAL)
-  // ================================
-
-  const clean = texteClean
-    .replace(/\|/g, '')
-    .replace(/\./g, '')
-    .replace(/[^0-9A-Z]/g, ' ');
-
-  // format classique
-  const d1 = clean.match(/\b(\d{2})[\/\- ](\d{2})[\/\- ](\d{4})\b/);
-
-  if (d1) {
-    infos.dateNaissance = `${d1[3]}-${d1[2]}-${d1[1]}`;
-  }
-
-  // format collé OCR
-  if (!infos.dateNaissance) {
-    const all = clean.match(/\b\d{8}\b/g);
-
-    if (all) {
-      const valid = all.find(v => {
-        const j = +v.slice(0, 2);
-        const m = +v.slice(2, 4);
-        const a = +v.slice(4, 8);
-
-        return j <= 31 && m <= 12 && a >= 1900 && a <= 2100;
-      });
-
-      if (valid) {
-        infos.dateNaissance =
-          `${valid.slice(4, 8)}-${valid.slice(2, 4)}-${valid.slice(0, 2)}`;
-      }
-    }
+    if (m) infos.numeroPiece = m.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c));
   }
 
   // ================================
   // MRZ fallback
   // ================================
-
   if (!infos.nom || !infos.prenom) {
     const mrz = texteClean.match(/[A-Z<]{25,}/g);
-
     if (mrz) {
-      const parts = mrz[0]
-        .replace(/</g, ' ')
-        .split(/\s+/)
-        .filter(Boolean);
-
+      const parts = mrz[0].replace(/</g, ' ').split(/\s+/).filter(Boolean);
       if (!infos.nom) infos.nom = nettoyer(parts[0]);
       if (!infos.prenom) infos.prenom = nettoyer(parts[1]);
     }
