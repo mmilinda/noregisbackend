@@ -1,0 +1,575 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Registre Visiteurs API",
+    "description": "Documentation automatique de l'API de gestion des visiteurs",
+    "version": "1.0.0"
+  },
+  "host": "noregisbackend.onrender.com",
+  "basePath": "/",
+  "schemes": [
+    "https"
+  ],
+  "securityDefinitions": {
+    "BearerAuth": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "Authorization",
+      "description": "Entrez votre token JWT : Bearer <token>"
+    }
+  },
+  "paths": {
+    "/login": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "example": "any"
+                },
+                "motDePasse": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/register": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "nom": {
+                  "example": "any"
+                },
+                "email": {
+                  "example": "any"
+                },
+                "motDePasse": {
+                  "example": "any"
+                },
+                "role": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/profil": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "statut",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "dateDebut",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "dateFin",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      },
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/en-cours": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/entree": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "visiteurId": {
+                  "example": "any"
+                },
+                "personneVisitee": {
+                  "example": "any"
+                },
+                "service": {
+                  "example": "any"
+                },
+                "motif": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/sortie/{id}": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "LoginInput": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "example": "admin@example.com"
+        },
+        "motDePasse": {
+          "type": "string",
+          "example": "motdepasse123"
+        }
+      }
+    },
+    "RegisterInput": {
+      "type": "object",
+      "properties": {
+        "nom": {
+          "type": "string",
+          "example": "Jean Dupont"
+        },
+        "email": {
+          "type": "string",
+          "example": "jean@example.com"
+        },
+        "motDePasse": {
+          "type": "string",
+          "example": "motdepasse123"
+        },
+        "role": {
+          "type": "string",
+          "example": "AGENT"
+        }
+      }
+    },
+    "VisiteurInput": {
+      "type": "object",
+      "properties": {
+        "nom": {
+          "type": "string",
+          "example": "Dupont"
+        },
+        "prenom": {
+          "type": "string",
+          "example": "Jean"
+        },
+        "dateNaissance": {
+          "type": "string",
+          "example": "1990-05-15"
+        },
+        "numeroPiece": {
+          "type": "string",
+          "example": "CNI123456"
+        },
+        "typePiece": {
+          "type": "string",
+          "example": "CNI"
+        }
+      }
+    },
+    "EntreeInput": {
+      "type": "object",
+      "properties": {
+        "visiteurId": {
+          "type": "string",
+          "example": "664f1a2b3c4d5e6f7a8b9c0d"
+        },
+        "personneVisitee": {
+          "type": "string",
+          "example": "Mme Koné"
+        },
+        "service": {
+          "type": "string",
+          "example": "Ressources Humaines"
+        },
+        "motif": {
+          "type": "string",
+          "example": "Entretien d'embauche"
+        }
+      }
+    },
+    "Visiteur": {
+      "type": "object",
+      "properties": {
+        "_id": {
+          "type": "string",
+          "example": "664f1a2b3c4d5e6f7a8b9c0d"
+        },
+        "nom": {
+          "type": "string",
+          "example": "Dupont"
+        },
+        "prenom": {
+          "type": "string",
+          "example": "Jean"
+        },
+        "dateNaissance": {
+          "type": "string",
+          "example": "1990-05-15"
+        },
+        "numeroPiece": {
+          "type": "string",
+          "example": "CNI123456"
+        },
+        "typePiece": {
+          "type": "string",
+          "example": "CNI"
+        },
+        "createdAt": {
+          "type": "string",
+          "example": "2024-01-01T00:00:00.000Z"
+        },
+        "updatedAt": {
+          "type": "string",
+          "example": "2024-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    "Visite": {
+      "type": "object",
+      "properties": {
+        "_id": {
+          "type": "string",
+          "example": "664f1a2b3c4d5e6f7a8b9c0e"
+        },
+        "visiteurId": {
+          "type": "string",
+          "example": "664f1a2b3c4d5e6f7a8b9c0d"
+        },
+        "personneVisitee": {
+          "type": "string",
+          "example": "Mme Koné"
+        },
+        "service": {
+          "type": "string",
+          "example": "Ressources Humaines"
+        },
+        "heureEntree": {
+          "type": "string",
+          "example": "2024-01-01T08:00:00.000Z"
+        },
+        "heureSortie": {},
+        "statut": {
+          "type": "string",
+          "example": "EN_COURS"
+        },
+        "motif": {
+          "type": "string",
+          "example": "Entretien d'embauche"
+        },
+        "createdAt": {
+          "type": "string",
+          "example": "2024-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    "Utilisateur": {
+      "type": "object",
+      "properties": {
+        "_id": {
+          "type": "string",
+          "example": "664f1a2b3c4d5e6f7a8b9c0f"
+        },
+        "nom": {
+          "type": "string",
+          "example": "Admin"
+        },
+        "email": {
+          "type": "string",
+          "example": "admin@example.com"
+        },
+        "role": {
+          "type": "string",
+          "example": "ADMIN"
+        },
+        "isActif": {
+          "type": "boolean",
+          "example": true
+        }
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": false
+        },
+        "message": {
+          "type": "string",
+          "example": "Une erreur est survenue"
+        }
+      }
+    },
+    "SuccessResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": true
+        },
+        "message": {
+          "type": "string",
+          "example": "Opération réussie"
+        }
+      }
+    }
+  }
+}

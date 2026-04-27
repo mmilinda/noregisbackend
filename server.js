@@ -1,8 +1,10 @@
 require('dotenv').config();
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
+const express       = require('express');
+const cors          = require('cors');
+const path          = require('path');
 const { connectDB } = require('./config/database');
+const swaggerUi     = require('swagger-ui-express');
+const swaggerOutput = require('./swagger-output.json');
 
 const app = express();
 
@@ -10,6 +12,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Documentation Swagger (auto-générée)
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerOutput));
 
 app.use('/api/auth',      require('./routes/auth'));
 app.use('/api/visiteurs', require('./routes/visiteurs'));
