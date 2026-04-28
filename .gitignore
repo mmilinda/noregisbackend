@@ -1,4 +1,28 @@
+cat > .gitignore << 'EOF'
+# Variables d'environnement
 .env
+.env.local
+.env.production
+
+# Dépendances
 node_modules/
+
+# Fichiers uploadés
 uploads/
+
+# Logs
 *.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editeurs
+.vscode/
+.idea/
+
+# Fichiers temporaires
+*.tmp
+*_processed.png
+EOF
