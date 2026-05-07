@@ -1,127 +1,106 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
+const sharp = require('sharp');
 const { Document } = require('../models');
 
-// Configuration Mindee
 const MINDEE_API_KEY = process.env.MINDEE_API_KEY;
 const MINDEE_API_URL = 'https://api.mindee.net/v2/products/mindee/international_id/v2/predict';
 
-const scannerImage = async (req, res) => {
+async function preparerImage(imagePath) {
+  const outPath = imagePath + '_prepared.jpg';
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
-    }
-
-    const cheminFichier = req.file.path;
-
-    // Sauvegarde en base
-    const document = await Document.create({
-      nomFichier:    req.file.filename,
-      cheminFichier,
-      typeMime:      req.file.mimetype,
-      tailleFichier: req.file.size,
-    });
-
-    // 👉 Appel à l'API Mindee (remplace Tesseract)
-    const infosExtraites = await extraireAvecMindee(cheminFichier);
-
-    console.log('📄 Infos extraites par Mindee:\n', infosExtraites);
-
-    // Envoi temps réel via Socket.io
-    const io = req.app.get('io');
-    if (io) {
-      io.emit('ocr:donnees', {
-        infosExtraites,
-        nomFichier: document.nomFichier,
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: 'Scan terminé.',
-      document: { id: document._id, nomFichier: document.nomFichier },
-      infosExtraites,
-    });
-
+    await sharp(imagePath)
+      .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+      .normalize()
+      .jpeg({ quality: 85 })
+      .toFile(outPath);
+    return outPath;
   } catch (err) {
-    console.error('Erreur:', err);
-    return res.status(500).json({ success: false, message: err.message });
+    console.error('Sharp error:', err);
+    return imagePath;
   }
-};
+}
 
-// 👉 Fonction d'appel à l'API Mindee
-const extraireAvecMindee = async (cheminFichier) => {
+const extraireAvecMindee = async (fichierPath, fileInfos) => {
   try {
-    const formData = new FormData();
-    formData.append('document', fs.createReadStream(cheminFichier));
+    console.log('--- Mindee request ---');
+    console.log('File size:', fs.statSync(fichierPath).size);
+    console.log('MIME:', fileInfos.mimetype);
 
-    const response = await axios.post(MINDEE_API_URL, formData, {
-      headers: {
-        ...formData.getHeaders(),
-        'Authorization': `Token ${MINDEE_API_KEY}`,
-      },
+    const form = new FormData();
+    form.append('document', fs.createReadStream(fichierPath));
+
+    const response = await axios.post(MINDEE_API_URL, form, {
+      headers: { ...form.getHeaders(), Authorization: `Token ${MINDEE_API_KEY}` },
       timeout: 30000,
     });
 
-    const prediction = response.data.document.inference.prediction;
-
-    // Formatage du résultat
+    const p = response.data.document.inference.prediction;
     return {
-      nom: prediction.last_name?.value || prediction.surnames?.[0]?.value || null,
-      prenom: prediction.first_name?.value || prediction.given_names?.[0]?.value || null,
-      numeroPiece: prediction.document_number?.value || null,
-      dateNaissance: prediction.birth_date?.value || null,
-      dateExpiration: prediction.expiry_date?.value || null,
-      sexe: getSexe(prediction.sex?.value),
-      nationalite: prediction.nationality?.value || null,
-      typePiece: getTypeDocument(prediction.document_type?.value),
-      paysEmission: prediction.country_of_issue?.value || null,
-      adresse: prediction.address?.value || null,
-      mrz: prediction.mrz_line?.value || null,
+      nom: p.last_name?.value || p.surnames?.[0]?.value || null,
+      prenom: p.first_name?.value || p.given_names?.[0]?.value || null,
+      numeroPiece: p.document_number?.value || null,
+      dateNaissance: p.birth_date?.value || null,
+      dateExpiration: p.expiry_date?.value || null,
+      sexe: p.sex?.value === 'M' ? 'Masculin' : (p.sex?.value === 'F' ? 'Féminin' : null),
+      nationalite: p.nationality?.value || null,
+      typePiece: getTypeDocument(p.document_type?.value),
+      paysEmission: p.country_of_issue?.value || null,
+      adresse: p.address?.value || null,
+      mrz: p.mrz_line?.value || null,
       confiance: {
-        nom: prediction.last_name?.confidence || 0,
-        prenom: prediction.first_name?.confidence || 0,
-        numero: prediction.document_number?.confidence || 0,
-      }
+        nom: p.last_name?.confidence || 0,
+        prenom: p.first_name?.confidence || 0,
+        numero: p.document_number?.confidence || 0,
+      },
     };
-
-  } catch (error) {
-    console.error('Erreur Mindee:', error.response?.data || error.message);
-    // En cas d'échec, retourne un objet vide
+  } catch (err) {
+    console.error('Mindee error:', err.response?.data || err.message);
     return {
-      nom: null,
-      prenom: null,
-      numeroPiece: null,
-      dateNaissance: null,
-      dateExpiration: null,
-      sexe: null,
-      nationalite: null,
-      typePiece: 'INCONNU',
-      paysEmission: null,
-      adresse: null,
-      mrz: null,
-      confiance: { nom: 0, prenom: 0, numero: 0 }
+      nom: null, prenom: null, numeroPiece: null, dateNaissance: null,
+      dateExpiration: null, sexe: null, nationalite: null, typePiece: 'INCONNU',
+      paysEmission: null, adresse: null, mrz: null,
+      confiance: { nom: 0, prenom: 0, numero: 0 },
     };
   }
 };
 
-// Fonction utilitaire pour le type de document
-const getTypeDocument = (type) => {
-  const types = {
-    'ID_CARD': 'CNI',
-    'PASSPORT': 'PASSEPORT',
-    'DRIVER_LICENSE': 'PERMIS DE CONDUIRE',
-    'RESIDENCE_PERMIT': 'CARTE DE SÉJOUR',
-  };
-  return types[type] || type || 'CNI';
+const scannerImage = async (req, res) => {
+  let originalPath = null, preparedPath = null;
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image' });
+
+    originalPath = req.file.path;
+    preparedPath = await preparerImage(originalPath);
+
+    const document = await Document.create({
+      nomFichier: req.file.filename,
+      cheminFichier: preparedPath,
+      typeMime: req.file.mimetype,
+      tailleFichier: fs.statSync(preparedPath).size,
+    });
+
+    const infos = await extraireAvecMindee(preparedPath, req.file);
+
+    const io = req.app.get('io');
+    if (io) io.emit('ocr:donnees', { infosExtraites: infos, nomFichier: document.nomFichier });
+
+    res.json({ success: true, message: 'Scan terminé', document: { id: document._id, nomFichier: document.nomFichier }, infosExtraites: infos });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    try {
+      if (originalPath && fs.existsSync(originalPath)) fs.unlinkSync(originalPath);
+      if (preparedPath && preparedPath !== originalPath && fs.existsSync(preparedPath)) fs.unlinkSync(preparedPath);
+    } catch (e) { console.error('Cleanup error', e); }
+  }
 };
 
-// Fonction utilitaire pour le sexe
-const getSexe = (sexe) => {
-  if (sexe === 'M') return 'Masculin';
-  if (sexe === 'F') return 'Féminin';
-  return null;
-};
+function getTypeDocument(type) {
+  const map = { ID_CARD: 'CNI', PASSPORT: 'PASSEPORT', DRIVER_LICENSE: 'PERMIS', RESIDENCE_PERMIT: 'CARTE_SEJOUR' };
+  return map[type] || type || 'CNI';
+}
 
 module.exports = { scannerImage };
