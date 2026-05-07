@@ -3,15 +3,17 @@ const sharp = require('sharp');
 const mindee = require('mindee');
 const { Document } = require('../models');
 
-// Configuration Mindee
+// ================================
+// CONFIGURATION
+// ================================
 const MINDEE_API_KEY = process.env.MINDEE_API_KEY;
-// Remplace par l'ID de ton modèle personnalisé (ou garde l'ID que tu as montré)
 const MODEL_ID = process.env.MINDEE_MODEL_ID || "ef4168fa-30a8-41ce-a972-eb152aa0cc86";
 
-// Initialisation du client Mindee
 const mindeeClient = new mindee.Client({ apiKey: MINDEE_API_KEY });
 
-// ------------------------- Prétraitement image -------------------------
+// ================================
+// PRÉTRAITEMENT IMAGE
+// ================================
 async function preparerImage(imagePath) {
   const outputPath = imagePath + '_prepared.jpg';
   try {
@@ -29,93 +31,125 @@ async function preparerImage(imagePath) {
     return outputPath;
   } catch (err) {
     console.error('❌ Sharp error:', err.message);
-    return imagePath;
+    return imagePath; // fallback : image originale
   }
 }
 
-// ------------------------- Appel Mindee (SDK) -------------------------
-async function extraireAvecMindee(imagePath, fileInfos) {
+// ================================
+// EXTRACTION MINDEE (GeneratedV1)
+// ================================
+async function extraireAvecMindee(imagePath) {
   try {
     console.log('--- Appel Mindee SDK ---');
-    console.log('📁 Fichier:', imagePath);
-    console.log('📦 Taille:', fs.statSync(imagePath).size, 'bytes');
+    console.log('📁 Fichier :', imagePath);
+    console.log('📦 Taille  :', fs.statSync(imagePath).size, 'bytes');
     console.log('🆔 Model ID:', MODEL_ID);
 
     const inputSource = new mindee.PathInput({ inputPath: imagePath });
 
+    // ✅ GeneratedV1 = classe correcte pour les modèles custom Mindee
     const response = await mindeeClient.enqueueAndGetResult(
-      mindee.product.Extraction,
+      mindee.product.GeneratedV1,
       inputSource,
-      {
-        modelId: MODEL_ID,
-        // Options utiles pour toi
-        confidence: true,   // pour avoir le niveau de confiance
-        polygon: false,     // inutile pour toi
-        rawText: false,
-        rag: false,
-      }
+      { modelId: MODEL_ID }
     );
 
     console.log('✅ Réponse Mindee reçue');
 
-    // La structure dépend de ton modèle personnalisé
-    // "response.inference.result.fields" contient les champs extraits
-    const fields = response.inference.result.fields || {};
+    // ─── DEBUG : affiche la structure brute pour identifier les vrais noms de champs ───
+    // À commenter une fois que tout fonctionne
+    console.log('🔍 Réponse brute (inference.prediction) :',
+      JSON.stringify(response?.document?.inference?.prediction, null, 2)
+    );
+    // ──────────────────────────────────────────────────────────────────────────────────
 
-    // Adaptation générique : on extrait les valeurs des champs
-    const extrait = {};
+    // ✅ Chemin correct pour GeneratedV1
+    const prediction = response?.document?.inference?.prediction || {};
+    const fields = prediction.fields || prediction || {};
 
-    for (const [key, value] of Object.entries(fields)) {
-      // value est un objet avec .value, .confidence, etc.
-      if (value && typeof value === 'object' && value.value !== undefined) {
-        extrait[key] = value.value;
-      } else {
-        extrait[key] = value;
+    console.log('📦 Champs disponibles :', Object.keys(fields));
+
+    /**
+     * Lecture robuste d'un champ Mindee :
+     * - GeneratedV1 peut renvoyer { value: "..." } ou [{ value: "..." }]
+     * - On gère les deux cas + valeur null si absent
+     */
+    const get = (...keys) => {
+      for (const key of keys) {
+        const val = fields[key];
+        if (!val) continue;
+        if (Array.isArray(val)) {
+          const v = val[0]?.value;
+          if (v !== undefined && v !== null && v !== '') return v;
+        } else if (typeof val === 'object') {
+          const v = val.value;
+          if (v !== undefined && v !== null && v !== '') return v;
+        } else if (val !== '') {
+          return val;
+        }
       }
-    }
-
-    // Si tu veux une mise en correspondance avec tes champs attendus (nom, prenom, etc.)
-    // adapte selon les noms de champs que tu as définis dans ton modèle personnalisé.
-    // Exemple de mapping :
-    const result = {
-      nom: extrait['nom'] || extrait['last_name'] || extrait['surname'] || null,
-      prenom: extrait['prenom'] || extrait['first_name'] || extrait['given_names'] || null,
-      numeroPiece: extrait['numero_piece'] || extrait['document_number'] || null,
-      dateNaissance: extrait['date_naissance'] || extrait['birth_date'] || null,
-      dateExpiration: extrait['date_expiration'] || extrait['expiry_date'] || null,
-      sexe: extrait['sexe'] || extrait['sex'] || null,
-      nationalite: extrait['nationalite'] || extrait['nationality'] || null,
-      typePiece: extrait['type_piece'] || extrait['document_type'] || 'CNI',
-      paysEmission: extrait['pays_emission'] || extrait['country_of_issue'] || null,
-      adresse: extrait['adresse'] || extrait['address'] || null,
-      mrz: extrait['mrz'] || null,
-      confiance: {
-        nom: fields['nom']?.confidence || fields['last_name']?.confidence || 0,
-        prenom: fields['prenom']?.confidence || fields['first_name']?.confidence || 0,
-        numero: fields['numero_piece']?.confidence || fields['document_number']?.confidence || 0,
-      }
+      return null;
     };
 
+    /**
+     * Confidence robuste d'un champ Mindee
+     */
+    const conf = (...keys) => {
+      for (const key of keys) {
+        const val = fields[key];
+        if (!val) continue;
+        if (Array.isArray(val)) return val[0]?.confidence ?? 0;
+        if (typeof val === 'object') return val.confidence ?? 0;
+      }
+      return 0;
+    };
+
+    // ─── Mapping vers tes champs applicatifs ───
+    // Si les noms dans le log ci-dessus sont différents, mets-les ici
+    const result = {
+      nom:            get('nom', 'last_name', 'surname', 'family_name'),
+      prenom:         get('prenom', 'first_name', 'given_name', 'given_names', 'prenoms'),
+      numeroPiece:    get('numero_piece', 'numero', 'document_number', 'id_number', 'number'),
+      dateNaissance:  get('date_naissance', 'birth_date', 'date_of_birth', 'dob'),
+      dateExpiration: get('date_expiration', 'expiry_date', 'expiration_date', 'date_expiry'),
+      sexe:           get('sexe', 'sex', 'gender'),
+      nationalite:    get('nationalite', 'nationality'),
+      typePiece:      get('type_piece', 'document_type', 'type') || 'CNI',
+      paysEmission:   get('pays_emission', 'country_of_issue', 'issuing_country', 'country'),
+      adresse:        get('adresse', 'address'),
+      mrz:            get('mrz', 'mrz_line1', 'mrz1'),
+      mrz2:           get('mrz2', 'mrz_line2'),
+      confiance: {
+        nom:    conf('nom', 'last_name', 'surname'),
+        prenom: conf('prenom', 'first_name', 'given_names'),
+        numero: conf('numero_piece', 'document_number', 'id_number'),
+      },
+    };
+
+    console.log('📄 Résultat extrait :', result);
     return result;
+
   } catch (error) {
-    console.error('❌ Erreur Mindee SDK:');
+    console.error('❌ Erreur Mindee SDK :');
     if (error.response) {
-      console.error('Statut:', error.response.status);
-      console.error('Données:', JSON.stringify(error.response.data, null, 2));
+      console.error('Statut :', error.response.status);
+      console.error('Données :', JSON.stringify(error.response.data, null, 2));
     } else {
       console.error(error.message);
     }
-    // Retour vide
+    // Retour vide structuré (ne fait pas planter le reste)
     return {
       nom: null, prenom: null, numeroPiece: null, dateNaissance: null,
       dateExpiration: null, sexe: null, nationalite: null, typePiece: 'INCONNU',
-      paysEmission: null, adresse: null, mrz: null,
+      paysEmission: null, adresse: null, mrz: null, mrz2: null,
       confiance: { nom: 0, prenom: 0, numero: 0 },
     };
   }
 }
 
-// ------------------------- Contrôleur principal -------------------------
+// ================================
+// CONTRÔLEUR PRINCIPAL
+// ================================
 const scannerImage = async (req, res) => {
   let originalPath = null;
   let preparedPath = null;
@@ -130,26 +164,23 @@ const scannerImage = async (req, res) => {
     // 1. Prétraitement
     preparedPath = await preparerImage(originalPath);
 
-    // 2. Sauvegarde en base (optionnel, mais gardé)
+    // 2. Sauvegarde en base
     const document = await Document.create({
-      nomFichier: req.file.filename,
+      nomFichier:    req.file.filename,
       cheminFichier: preparedPath,
-      typeMime: req.file.mimetype,
+      typeMime:      req.file.mimetype,
       tailleFichier: fs.statSync(preparedPath).size,
     });
 
     // 3. Extraction Mindee
-    const infosExtraites = await extraireAvecMindee(preparedPath, req.file);
+    const infosExtraites = await extraireAvecMindee(preparedPath);
 
-    console.log('📄 Infos extraites:', infosExtraites);
+    console.log('📄 Infos finales :', infosExtraites);
 
-    // 4. Socket.io (si tu utilises)
+    // 4. Socket.io (si utilisé)
     const io = req.app.get('io');
     if (io) {
-      io.emit('ocr:donnees', {
-        infosExtraites,
-        nomFichier: document.nomFichier,
-      });
+      io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
     }
 
     // 5. Réponse
@@ -159,16 +190,20 @@ const scannerImage = async (req, res) => {
       document: { id: document._id, nomFichier: document.nomFichier },
       infosExtraites,
     });
+
   } catch (err) {
-    console.error('❌ Erreur générale:', err);
+    console.error('❌ Erreur générale :', err);
     return res.status(500).json({ success: false, message: err.message });
+
   } finally {
     // 6. Nettoyage fichiers temporaires
     try {
       if (originalPath && fs.existsSync(originalPath)) fs.unlinkSync(originalPath);
-      if (preparedPath && preparedPath !== originalPath && fs.existsSync(preparedPath)) fs.unlinkSync(preparedPath);
+      if (preparedPath && preparedPath !== originalPath && fs.existsSync(preparedPath)) {
+        fs.unlinkSync(preparedPath);
+      }
     } catch (e) {
-      console.error('Nettoyage échoué:', e);
+      console.error('Nettoyage échoué :', e);
     }
   }
 };
