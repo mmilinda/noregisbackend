@@ -1,211 +1,216 @@
-const fs = require('fs');
-const sharp = require('sharp');
-const mindee = require('mindee');
+const Tesseract  = require('tesseract.js');
 const { Document } = require('../models');
 
-// ================================
-// CONFIGURATION
-// ================================
-const MINDEE_API_KEY = process.env.MINDEE_API_KEY;
-const MODEL_ID = process.env.MINDEE_MODEL_ID || "ef4168fa-30a8-41ce-a972-eb152aa0cc86";
-
-const mindeeClient = new mindee.Client({ apiKey: MINDEE_API_KEY });
-
-// ================================
-// PRÉTRAITEMENT IMAGE
-// ================================
-async function preparerImage(imagePath) {
-  const outputPath = imagePath + '_prepared.jpg';
-  try {
-    const metadata = await sharp(imagePath).metadata();
-    console.log(`📸 Original : ${metadata.width}x${metadata.height}, ${metadata.size} bytes`);
-
-    await sharp(imagePath)
-      .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
-      .normalize()
-      .jpeg({ quality: 85 })
-      .toFile(outputPath);
-
-    const stats = fs.statSync(outputPath);
-    console.log(`✅ Image préparée : ${outputPath} (${stats.size} bytes)`);
-    return outputPath;
-  } catch (err) {
-    console.error('❌ Sharp error:', err.message);
-    return imagePath; // fallback : image originale
-  }
-}
-
-// ================================
-// EXTRACTION MINDEE (GeneratedV1)
-// ================================
-async function extraireAvecMindee(imagePath) {
-  try {
-    console.log('--- Appel Mindee SDK ---');
-    console.log('📁 Fichier :', imagePath);
-    console.log('📦 Taille  :', fs.statSync(imagePath).size, 'bytes');
-    console.log('🆔 Model ID:', MODEL_ID);
-
-    const inputSource = new mindee.PathInput({ inputPath: imagePath });
-
-    // ✅ GeneratedV1 = classe correcte pour les modèles custom Mindee
-    const response = await mindeeClient.enqueueAndGetResult(
-      mindee.product.GeneratedV1,
-      inputSource,
-      { modelId: MODEL_ID }
-    );
-
-    console.log('✅ Réponse Mindee reçue');
-
-    // ─── DEBUG : affiche la structure brute pour identifier les vrais noms de champs ───
-    // À commenter une fois que tout fonctionne
-    console.log('🔍 Réponse brute (inference.prediction) :',
-      JSON.stringify(response?.document?.inference?.prediction, null, 2)
-    );
-    // ──────────────────────────────────────────────────────────────────────────────────
-
-    // ✅ Chemin correct pour GeneratedV1
-    const prediction = response?.document?.inference?.prediction || {};
-    const fields = prediction.fields || prediction || {};
-
-    console.log('📦 Champs disponibles :', Object.keys(fields));
-
-    /**
-     * Lecture robuste d'un champ Mindee :
-     * - GeneratedV1 peut renvoyer { value: "..." } ou [{ value: "..." }]
-     * - On gère les deux cas + valeur null si absent
-     */
-    const get = (...keys) => {
-      for (const key of keys) {
-        const val = fields[key];
-        if (!val) continue;
-        if (Array.isArray(val)) {
-          const v = val[0]?.value;
-          if (v !== undefined && v !== null && v !== '') return v;
-        } else if (typeof val === 'object') {
-          const v = val.value;
-          if (v !== undefined && v !== null && v !== '') return v;
-        } else if (val !== '') {
-          return val;
-        }
-      }
-      return null;
-    };
-
-    /**
-     * Confidence robuste d'un champ Mindee
-     */
-    const conf = (...keys) => {
-      for (const key of keys) {
-        const val = fields[key];
-        if (!val) continue;
-        if (Array.isArray(val)) return val[0]?.confidence ?? 0;
-        if (typeof val === 'object') return val.confidence ?? 0;
-      }
-      return 0;
-    };
-
-    // ─── Mapping vers tes champs applicatifs ───
-    // Si les noms dans le log ci-dessus sont différents, mets-les ici
-    const result = {
-      nom:            get('nom', 'last_name', 'surname', 'family_name'),
-      prenom:         get('prenom', 'first_name', 'given_name', 'given_names', 'prenoms'),
-      numeroPiece:    get('numero_piece', 'numero', 'document_number', 'id_number', 'number'),
-      dateNaissance:  get('date_naissance', 'birth_date', 'date_of_birth', 'dob'),
-      dateExpiration: get('date_expiration', 'expiry_date', 'expiration_date', 'date_expiry'),
-      sexe:           get('sexe', 'sex', 'gender'),
-      nationalite:    get('nationalite', 'nationality'),
-      typePiece:      get('type_piece', 'document_type', 'type') || 'CNI',
-      paysEmission:   get('pays_emission', 'country_of_issue', 'issuing_country', 'country'),
-      adresse:        get('adresse', 'address'),
-      mrz:            get('mrz', 'mrz_line1', 'mrz1'),
-      mrz2:           get('mrz2', 'mrz_line2'),
-      confiance: {
-        nom:    conf('nom', 'last_name', 'surname'),
-        prenom: conf('prenom', 'first_name', 'given_names'),
-        numero: conf('numero_piece', 'document_number', 'id_number'),
-      },
-    };
-
-    console.log('📄 Résultat extrait :', result);
-    return result;
-
-  } catch (error) {
-    console.error('❌ Erreur Mindee SDK :');
-    if (error.response) {
-      console.error('Statut :', error.response.status);
-      console.error('Données :', JSON.stringify(error.response.data, null, 2));
-    } else {
-      console.error(error.message);
-    }
-    // Retour vide structuré (ne fait pas planter le reste)
-    return {
-      nom: null, prenom: null, numeroPiece: null, dateNaissance: null,
-      dateExpiration: null, sexe: null, nationalite: null, typePiece: 'INCONNU',
-      paysEmission: null, adresse: null, mrz: null, mrz2: null,
-      confiance: { nom: 0, prenom: 0, numero: 0 },
-    };
-  }
-}
-
-// ================================
-// CONTRÔLEUR PRINCIPAL
-// ================================
 const scannerImage = async (req, res) => {
-  let originalPath = null;
-  let preparedPath = null;
-
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
     }
 
-    originalPath = req.file.path;
+    const cheminFichier = req.file.path;
 
-    // 1. Prétraitement
-    preparedPath = await preparerImage(originalPath);
-
-    // 2. Sauvegarde en base
     const document = await Document.create({
       nomFichier:    req.file.filename,
-      cheminFichier: preparedPath,
+      cheminFichier,
       typeMime:      req.file.mimetype,
-      tailleFichier: fs.statSync(preparedPath).size,
+      tailleFichier: req.file.size,
     });
 
-    // 3. Extraction Mindee
-    const infosExtraites = await extraireAvecMindee(preparedPath);
+    const { data: { text } } = await Tesseract.recognize(
+      cheminFichier,
+      'fra+eng',
+      { logger: () => {}, tessedit_pageseg_mode: 6 }
+    );
 
-    console.log('📄 Infos finales :', infosExtraites);
+    console.log('📄 OCR RAW:\n', text);
 
-    // 4. Socket.io (si utilisé)
+    const infosExtraites = extraireInfosPiece(text);
+
+    // ── Envoi temps réel → formulaire frontend via Socket.io ──
     const io = req.app.get('io');
     if (io) {
-      io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
+      io.emit('ocr:donnees', {
+        infosExtraites,
+        nomFichier: document.nomFichier,
+      });
     }
 
-    // 5. Réponse
     return res.json({
       success: true,
       message: 'Scan terminé.',
       document: { id: document._id, nomFichier: document.nomFichier },
       infosExtraites,
+      texteRaw: text,
     });
 
   } catch (err) {
-    console.error('❌ Erreur générale :', err);
     return res.status(500).json({ success: false, message: err.message });
+  }
+};
 
-  } finally {
-    // 6. Nettoyage fichiers temporaires
-    try {
-      if (originalPath && fs.existsSync(originalPath)) fs.unlinkSync(originalPath);
-      if (preparedPath && preparedPath !== originalPath && fs.existsSync(preparedPath)) {
-        fs.unlinkSync(preparedPath);
+const nettoyer = (str) => {
+  if (!str) return null;
+  return str
+    .replace(/["""«»]/g, '')
+    .replace(/,/g, ' ')
+    .replace(/[^a-zA-ZÀ-ÿ\-\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || null;
+};
+
+const extraireDate = (texte) => {
+  const d1 = texte.match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
+  if (d1) {
+    const j = +d1[1], m = +d1[2], a = +d1[3];
+    if (j >= 1 && j <= 31 && m >= 1 && m <= 12 && a >= 1900 && a <= 2100)
+      return `${d1[3]}-${d1[2]}-${d1[1]}`;
+  }
+  const chiffres = texte.replace(/[^0-9]/g, ' ');
+  const all = chiffres.match(/\b\d{8}\b/g);
+  if (all) {
+    const valid = all.find(v => {
+      const j = +v.slice(0,2), m = +v.slice(2,4), a = +v.slice(4,8);
+      return j >= 1 && j <= 31 && m >= 1 && m <= 12 && a >= 1900 && a <= 2100;
+    });
+    if (valid) return `${valid.slice(4,8)}-${valid.slice(2,4)}-${valid.slice(0,2)}`;
+  }
+  return null;
+};
+
+const valeurApresLabel = (lignes, regex, maxLignes = 3) => {
+  for (let i = 0; i < lignes.length; i++) {
+    if (regex.test(lignes[i])) {
+      for (let j = 1; j <= maxLignes; j++) {
+        const l = (lignes[i + j] || '').trim();
+        if (l && l.length > 1) return l;
       }
-    } catch (e) {
-      console.error('Nettoyage échoué :', e);
     }
   }
+  return null;
+};
+
+const extraireInfosPiece = (texte) => {
+  const infos = { nom: null, prenom: null, numeroPiece: null, typePiece: 'CNI', dateNaissance: null };
+  const lignes = texte.split('\n').map(l => l.trim()).filter(Boolean);
+  const upper  = texte.toUpperCase();
+
+  if (upper.includes('PASSEPORT')) infos.typePiece = 'PASSEPORT';
+  else if (upper.includes('PERMIS DE CONDUIRE')) infos.typePiece = 'PERMIS';
+  else if (upper.includes("CARTE D'IDENTITE") || upper.includes('CARTE NATIONALE') || upper.includes('CEDEAO') || upper.includes('CNI')) infos.typePiece = 'CNI';
+  else if (upper.includes('SEJOUR')) infos.typePiece = 'CARTE_SEJOUR';
+
+  for (let i = 0; i < lignes.length; i++) {
+    if (/date\s*de\s*naiss|date\s*of\s*birth/i.test(lignes[i])) {
+      const meme = lignes[i].match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
+      if (meme) { infos.dateNaissance = `${meme[3]}-${meme[2]}-${meme[1]}`; break; }
+      for (let j = 1; j <= 3; j++) {
+        const d = extraireDate(lignes[i + j] || '');
+        if (d) { infos.dateNaissance = d; break; }
+      }
+      if (infos.dateNaissance) break;
+    }
+  }
+  if (!infos.dateNaissance) infos.dateNaissance = extraireDate(texte);
+
+  const texteClean  = texte.replace(/\|/g, 'I').replace(/[\u2018\u2019]/g, "'");
+  const lignesClean = texteClean.split('\n').map(l => l.trim()).filter(Boolean);
+
+  const blacklist = new Set(['REPUBLIQUE','FRANCAISE','FRANÇAISE','SENEGAL','SÉNÉGAL','CARTE','NATIONALE','IDENTITE','IDENTITÉ','DOCUMENT','PASSEPORT','NOM','SEXE','NATIONALITE','NATIONALITÉ','CEDEAO','ECOWAS','IDENTITY','CARD']);
+
+  const nomLabel = valeurApresLabel(lignesClean, /^(Nom|Surname|Last\s*name)\s*[:\-]?\s*$/i);
+  if (nomLabel) {
+    const c = nomLabel.match(/\b[A-ZÉÈÀÙÂÊÎÔÛÇÑ]{2,}\b/);
+    if (c && !blacklist.has(c[0])) infos.nom = nettoyer(c[0]);
+  }
+  if (!infos.nom) {
+    for (const l of lignesClean) {
+      const m = l.match(/^Nom\s*[:\-]?\s*([A-ZÉÈÀÙÂÊÎÔÛÇ]{2,})/i);
+      if (m && !blacklist.has(m[1].toUpperCase())) { infos.nom = nettoyer(m[1]); break; }
+    }
+  }
+  if (!infos.nom) {
+    const candidats = texteClean.match(/\b[A-ZÉÈÀÙÂÊÎÔÛÇ]{3,}\b/g) || [];
+    let best = null, scoreMax = -999;
+    candidats.forEach(c => {
+      if (blacklist.has(c.toUpperCase())) return;
+      let score = 0;
+      if (c.length >= 3 && c.length <= 15) score += 5;
+      const pos    = texteClean.indexOf(c);
+      const posNom = texteClean.search(/\bNom\b/i);
+      if (posNom !== -1 && pos > posNom && pos < posNom + 100) score += 10;
+      if (score > scoreMax) { scoreMax = score; best = c; }
+    });
+    if (best) infos.nom = nettoyer(best);
+  }
+
+  const prenomLabel = valeurApresLabel(lignesClean, /^(Pr[ée]noms?|Given\s*names?|Forename)\s*[:\-]?\s*$/i);
+  if (prenomLabel) infos.prenom = nettoyer(prenomLabel);
+  if (!infos.prenom) {
+    for (const l of lignesClean) {
+      const m = l.match(/Pr[ée]noms?\s*[:\-]?\s*(.+)/i);
+      if (m) { infos.prenom = nettoyer(m[1]); break; }
+    }
+  }
+  if (!infos.prenom) {
+    for (let i = 0; i < lignesClean.length; i++) {
+      if (/Pr[ée]noms?|Given/i.test(lignesClean[i])) {
+        for (let j = 1; j <= 3; j++) {
+          let l = lignesClean[i + j];
+          if (!l) continue;
+          l = l.replace(/^[^A-ZÀ-ÿ]+/,'').replace(/[0-9]/g,'').replace(/[-–—]+/g,' ').replace(/,/g,' ').trim();
+          const m = l.match(/[A-ZÀ-ÿ][a-zà-ÿ]+(?:[\s\-][A-ZÀ-ÿ][a-zà-ÿ]+)*/g);
+          if (m && m.join(' ').length > 2) { infos.prenom = nettoyer(m.join(' ')); break; }
+        }
+      }
+      if (infos.prenom) break;
+    }
+  }
+
+  for (let i = 0; i < lignesClean.length; i++) {
+    if (/N[°º]\s*de\s*la\s*carte|carte\s*d.identit/i.test(lignesClean[i])) {
+      const meme = lignesClean[i].match(/\b([A-Z0-9\s]{6,25})\b/g);
+      if (meme) {
+        const code = meme.find(c => /\d/.test(c) && c.trim().length >= 6);
+        if (code) { infos.numeroPiece = code.replace(/\s+/g,''); break; }
+      }
+      for (let j = 1; j <= 3; j++) {
+        const l = lignesClean[i + j] || '';
+        const m = l.match(/[\d\s]{6,25}/);
+        if (m) { infos.numeroPiece = m[0].replace(/\s+/g,''); break; }
+      }
+      if (infos.numeroPiece) break;
+    }
+  }
+  if (!infos.numeroPiece) {
+    for (let i = 0; i < lignesClean.length; i++) {
+      if (/N[°º]\s*DU\s*DOCUMENT|Document\s*No/i.test(lignesClean[i])) {
+        for (let j = 0; j <= 4; j++) {
+          const l = lignesClean[i + j] || '';
+          const m = l.match(/\b([A-Z0-9]{6,15})\b/g);
+          if (m) {
+            const code = m.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c));
+            if (code) { infos.numeroPiece = code; break; }
+          }
+        }
+        if (infos.numeroPiece) break;
+      }
+    }
+  }
+  if (!infos.numeroPiece) {
+    const m = texteClean.match(/\b([A-Z][A-Z0-9]{6,14})\b/g);
+    if (m) infos.numeroPiece = m.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c));
+  }
+
+  if (!infos.nom || !infos.prenom) {
+    const mrz = texteClean.match(/[A-Z<]{25,}/g);
+    if (mrz) {
+      const parts = mrz[0].replace(/</g,' ').split(/\s+/).filter(Boolean);
+      if (!infos.nom)    infos.nom    = nettoyer(parts[0]);
+      if (!infos.prenom) infos.prenom = nettoyer(parts[1]);
+    }
+  }
+
+  return infos;
 };
 
 module.exports = { scannerImage };
