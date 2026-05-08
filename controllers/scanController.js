@@ -32,7 +32,7 @@ const scannerImage = async (req, res) => {
       form,
       {
         headers: {
-          'Authorization': `Token ${process.env.MNDEE_API_KEY}`,
+          'Authorization': `Token ${process.env.MINDEE_API_KEY}`,
           ...form.getHeaders(),
         },
       }
