@@ -1,8 +1,7 @@
-const fs     = require('fs');
-const mindee = require('mindee');
+const fs      = require('fs');
+const axios   = require('axios');
+const FormData = require('form-data');
 const { Document } = require('../models');
-
-const mindeeClient = new mindee.Client({ apiKey: process.env.MINDEE_API_KEY });
 
 const scannerImage = async (req, res) => {
   try {
@@ -20,29 +19,41 @@ const scannerImage = async (req, res) => {
       tailleFichier: req.file.size,
     });
 
-    // 2. Appel Mindee — International ID (CNI, passeport, permis, tous pays)
-    const inputSource = mindeeClient.docFromPath(cheminFichier);
-    const apiResponse = await mindeeClient.parse(
-      mindee.product.InternationalIdV2,
-      inputSource
+    // 2. Préparer le formulaire multipart pour Mindee
+    const form = new FormData();
+    form.append('document', fs.createReadStream(cheminFichier), {
+      filename:    req.file.filename,
+      contentType: req.file.mimetype,
+    });
+
+    // 3. Appel direct à l'API Mindee (International ID v2)
+    const { data } = await axios.post(
+      'https://api.mindee.net/v1/products/mindee/international_id/v2/predict',
+      form,
+      {
+        headers: {
+          'Authorization': `Token ${process.env.MINDEE_API_KEY}`,
+          ...form.getHeaders(),
+        },
+      }
     );
 
-    const pred = apiResponse.document.inference.prediction;
+    const pred = data.document.inference.prediction;
     console.log('📄 Mindee RAW:', JSON.stringify(pred, null, 2));
 
-    // 3. Mapper vers votre format
+    // 4. Mapper vers votre format
     const infosExtraites = {
-      nom:           pred.surnames?.[0]?.value      || null,
-      prenom:        pred.givenNames?.[0]?.value    || null,
-      numeroPiece:   pred.documentNumber?.value     || null,
-      typePiece:     detecterType(pred.documentType?.value),
-      dateNaissance: pred.birthDate?.value          || null,
-      nationalite:   pred.nationality?.value        || null,
-      dateExpiration: pred.expiryDate?.value        || null,
-      pays:          pred.countryOfIssue?.value     || null,
+      nom:            pred.surnames?.[0]?.value     || null,
+      prenom:         pred.given_names?.[0]?.value  || null,
+      numeroPiece:    pred.document_number?.value   || null,
+      typePiece:      detecterType(pred.document_type?.value),
+      dateNaissance:  pred.birth_date?.value        || null,
+      nationalite:    pred.nationality?.value       || null,
+      dateExpiration: pred.expiry_date?.value       || null,
+      pays:           pred.country_of_issue?.value  || null,
     };
 
-    // 4. Socket.io temps réel
+    // 5. Socket.io temps réel
     const io = req.app.get('io');
     if (io) {
       io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
@@ -56,18 +67,17 @@ const scannerImage = async (req, res) => {
     });
 
   } catch (err) {
-    console.error('❌ Mindee error:', err.message);
+    console.error('❌ Scan error:', err?.response?.data || err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// ── Helpers ──────────────────────────────────────────────────────
 const detecterType = (type) => {
   if (!type) return 'CNI';
   const t = type.toUpperCase();
-  if (t.includes('PASSPORT'))   return 'PASSEPORT';
-  if (t.includes('DRIVER'))     return 'PERMIS';
-  if (t.includes('RESIDENCE'))  return 'CARTE_SEJOUR';
+  if (t.includes('PASSPORT'))  return 'PASSEPORT';
+  if (t.includes('DRIVER'))    return 'PERMIS';
+  if (t.includes('RESIDENCE')) return 'CARTE_SEJOUR';
   return 'CNI';
 };
 
