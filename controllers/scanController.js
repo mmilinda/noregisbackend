@@ -31,6 +31,10 @@ async function extraireAvecMindee(imagePath) {
       inputSource,
       { confidence: true }
     );
+
+    // 🔍 Affiche la réponse brute de Mindee (tous les champs reconnus)
+    console.log('📡 Réponse Mindee brute :', JSON.stringify(response.document.inference.prediction, null, 2));
+
     const p = response.document.inference.prediction;
     return {
       nom: p.last_name?.value || p.surnames?.[0]?.value || null,
