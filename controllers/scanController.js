@@ -1,4 +1,4 @@
-const Tesseract = require('tesseract.js');
+const Tesseract  = require('tesseract.js');
 const { Document } = require('../models');
 
 const scannerImage = async (req, res) => {
@@ -74,7 +74,7 @@ const extraireDate = (texte) => {
   return null;
 };
 
-/* ── Blacklist enrichie ──────────────────────────────────────────────────── */
+/* ── Blacklist ──────────────────────────────────────────────────────────── */
 
 const BLACKLIST = new Set([
   'REPUBLIQUE','FRANCAISE','FRANÇAISE','SENEGAL','SÉNÉGAL','CARTE','NATIONALE',
@@ -83,52 +83,59 @@ const BLACKLIST = new Set([
   'OWAS','TAILLE','LIEU','NAISSANCE','DELIVRANCE','EXPIRATION','CENTRE',
   'ENREGISTREMENT','DOMICILE','ADRESSE','DATE','PRENOM','PRENOMS','COMMUNE',
   'BIRTH','SURNAME','GIVEN','FORENAME','NAMES','TYPE','PIECE','NUMERO','NUMÉRO',
-  'SENEGALAN','SÉNÉGALAISE','LAN','THE','CL','M','F','HOMME','FEMME',
-  'Taille','Sexe','Lieu','Naissance','Délivrance','Expiration'
+  'SENEGALAN','SÉNÉGALAISE',
 ]);
 
 const isValidNom = (s) => {
   if (!s) return false;
   const up = s.toUpperCase().trim();
   if (BLACKLIST.has(up)) return false;
-  if (up.length < 2 || up.length > 35) return false;
+  if (up.length < 2 || up.length > 25) return false;
   if (/\d/.test(up)) return false;
-  // Le nom doit être principalement alphabétique
-  if (!/^[A-ZÀ-Ÿ]+$/.test(up)) return false;
   return true;
 };
 
-/* ── Extraction stricte d'une valeur après un label ─────────────────────── */
+/* ── Extraction label → valeur (gère label seul ET label+valeur sur 1 ligne) */
 
-const extraireValeurApresLabel = (lignes, labelPattern, lignesMax = 2) => {
+const extraireChamp = (lignes, labelRegex, labelsAIgnorerRegex = null) => {
   for (let i = 0; i < lignes.length; i++) {
     const ligne = lignes[i];
-    if (!labelPattern.test(ligne)) continue;
+    if (!labelRegex.test(ligne)) continue;
 
-    // 1) Même ligne : après le label
-    let apres = ligne.replace(labelPattern, '').replace(/^[\s:,-]+/, '').trim();
-    if (apres.length > 0) {
-      const mots = apres.match(/\b[A-ZÀ-Ÿ]{2,}\b/g) || [];
-      const valide = mots.find(m => isValidNom(m));
-      if (valide) return valide;
+    // ── Cas 1 : valeur sur la MÊME ligne après le label ──────────────────
+    // Ex: "Prénoms KHADIM" ou "Nom : FAYE"
+    const apresLabel = ligne
+      .replace(labelRegex, '')       // supprime le label
+      .replace(/^\s*[:\-]?\s*/, '')  // supprime séparateur optionnel
+      .trim();
+
+    if (apresLabel.length >= 2 && !/^\d+$/.test(apresLabel)) {
+      // Extrait les mots valides
+      const mots = apresLabel.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
+      const valides = mots.filter(m => isValidNom(m));
+      if (valides.length > 0) return valides.join(' ');
     }
 
-    // 2) Lignes suivantes (jusqu'à lignesMax) sans rencontrer un autre label
-    for (let j = 1; j <= lignesMax; j++) {
-      const suiv = lignes[i + j];
-      if (!suiv) break;
-      // Si la ligne suivante contient un label connu, on stoppe (c'est une autre section)
-      if (/^(Pr[ée]noms?|Nom|Date|Sexe|Taille|Lieu|N[°º]|Carte)\b/i.test(suiv)) break;
-      
-      const mots = suiv.match(/\b[A-ZÀ-Ÿ]{2,}\b/g) || [];
-      const valide = mots.find(m => isValidNom(m));
-      if (valide) return valide;
+    // ── Cas 2 : valeur sur les lignes SUIVANTES ───────────────────────────
+    // Ex: "Prénoms\nKHADIM" ou "Nom\nFAYE"
+    for (let j = 1; j <= 4; j++) {
+      const l = (lignes[i + j] || '').trim();
+      if (!l) continue;
+
+      // Ignore si c'est un autre label connu
+      if (labelsAIgnorerRegex && labelsAIgnorerRegex.test(l)) continue;
+      // Ignore les lignes purement numériques ou trop courtes
+      if (/^\d+$/.test(l) || l.length < 2) continue;
+
+      const mots = l.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
+      const valides = mots.filter(m => isValidNom(m));
+      if (valides.length > 0) return valides.join(' ');
     }
   }
   return null;
 };
 
-/* ── Extraction principale (nom, prénom, date, numéro) ──────────────────── */
+/* ── Extraction principale ──────────────────────────────────────────────── */
 
 const extraireInfosPiece = (texte) => {
   const infos = {
@@ -136,15 +143,12 @@ const extraireInfosPiece = (texte) => {
     typePiece: 'CNI', dateNaissance: null,
   };
 
-  // Nettoyage préalable du texte
-  let texteClean = texte
+  const texteClean = texte
     .replace(/\|/g, 'I')
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[^\w\sÀ-ÿ]/g, ' ')  // supprime la ponctuation
-    .replace(/\s+/g, ' ');
+    .replace(/[\u2018\u2019]/g, "'");
 
-  const lignes = texteClean.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  const upper = texteClean.toUpperCase();
+  const lignes = texteClean.split('\n').map(l => l.trim()).filter(Boolean);
+  const upper  = texteClean.toUpperCase();
 
   // ── Type de pièce ─────────────────────────────────────────────────────────
   if (upper.includes('PASSEPORT'))                                     infos.typePiece = 'PASSEPORT';
@@ -157,7 +161,7 @@ const extraireInfosPiece = (texte) => {
         || upper.includes('CNI'))                                       infos.typePiece = 'CNI';
   else if (upper.includes('SEJOUR'))                                   infos.typePiece = 'CARTE_SEJOUR';
 
-  // ── Date de naissance (inchangé) ─────────────────────────────────────────
+  // ── Date de naissance ─────────────────────────────────────────────────────
   for (let i = 0; i < lignes.length; i++) {
     if (/date\s*de\s*naiss|date\s*of\s*birth/i.test(lignes[i])) {
       const meme = lignes[i].match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
@@ -171,17 +175,26 @@ const extraireInfosPiece = (texte) => {
   }
   if (!infos.dateNaissance) infos.dateNaissance = extraireDate(texteClean);
 
-  // ── Extraction PRÉNOM (label "Prénoms" ou "Prénom") ──────────────────────
-  let prenomBrut = extraireValeurApresLabel(lignes, /^Pr[ée]noms?\s*[:]?\s*$/i);
-  if (!prenomBrut) prenomBrut = extraireValeurApresLabel(lignes, /^Given\s*names?|Forenames?/i);
+  // Labels à ignorer quand on cherche la valeur suivante
+  const LABELS_REGEX = /^(Pr[ée]noms?|Nom|Date|Sexe|Taille|Lieu|N[°º]|Carte|Birth|Surname|Given|Forename)\b/i;
+
+  // ── PRÉNOM ────────────────────────────────────────────────────────────────
+  const prenomBrut = extraireChamp(
+    lignes,
+    /Pr[ée]noms?\s*[:\-]?|Given\s*names?\s*[:\-]?|Forenames?\s*[:\-]?/i,
+    LABELS_REGEX
+  );
   if (prenomBrut) infos.prenom = nettoyer(prenomBrut);
 
-  // ── Extraction NOM (label "Nom") ─────────────────────────────────────────
-  let nomBrut = extraireValeurApresLabel(lignes, /^Nom\s*[:]?\s*$/i);
-  if (!nomBrut) nomBrut = extraireValeurApresLabel(lignes, /^Surname|Last\s*name/i);
+  // ── NOM ───────────────────────────────────────────────────────────────────
+  const nomBrut = extraireChamp(
+    lignes,
+    /^Nom\s*[:\-]?$|^Nom\s+[A-Z]|Surname\s*[:\-]?|Last\s*name\s*[:\-]?/i,
+    LABELS_REGEX
+  );
   if (nomBrut) infos.nom = nettoyer(nomBrut);
 
-  // ── Fallback nom : chercher un mot majuscule juste après le prénom ───────
+  // ── NOM fallback : mot majuscule après le prénom dans le texte brut ───────
   if (!infos.nom && infos.prenom) {
     const prenomUpper = infos.prenom.toUpperCase();
     const pos = upper.indexOf(prenomUpper);
@@ -193,12 +206,13 @@ const extraireInfosPiece = (texte) => {
     }
   }
 
-  // ── Numéro de pièce (inchangé mais robuste) ──────────────────────────────
-  // 1) Chercher "N° de la carte d'identité" ou similaire
+  // ── Numéro de pièce ───────────────────────────────────────────────────────
   for (let i = 0; i < lignes.length; i++) {
     if (/N[°º\.]\s*de\s*la\s*carte|carte\s*d.identit/i.test(lignes[i])) {
+      // Même ligne
       const meme = lignes[i].match(/[\d][\d\s]{5,}/);
       if (meme) { infos.numeroPiece = meme[0].replace(/\s+/g, ''); break; }
+      // Lignes suivantes
       for (let j = 1; j <= 4; j++) {
         const m = (lignes[i + j] || '').match(/[\d][\d\s]{5,}/);
         if (m) {
@@ -209,7 +223,7 @@ const extraireInfosPiece = (texte) => {
       if (infos.numeroPiece) break;
     }
   }
-  // 2) Sinon chercher "N° DU DOCUMENT"
+
   if (!infos.numeroPiece) {
     for (let i = 0; i < lignes.length; i++) {
       if (/N[°º]\s*DU\s*DOCUMENT|Document\s*No/i.test(lignes[i])) {
@@ -222,13 +236,13 @@ const extraireInfosPiece = (texte) => {
       }
     }
   }
-  // 3) Fallback général
+
   if (!infos.numeroPiece) {
     const m = texteClean.match(/\b([A-Z][A-Z0-9]{5,14})\b/g);
     if (m) infos.numeroPiece = m.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c)) || null;
   }
 
-  // ── MRZ fallback (si toujours pas de nom/prénom) ─────────────────────────
+  // ── MRZ fallback ──────────────────────────────────────────────────────────
   if (!infos.nom || !infos.prenom) {
     const mrzLines = lignes.filter(l => /^[A-Z<]{20,}/.test(l));
     if (mrzLines.length > 0) {
