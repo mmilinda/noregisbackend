@@ -57,14 +57,12 @@ const nettoyer = (str) => {
 };
 
 const extraireDate = (texte) => {
-  // Format JJ/MM/AAAA ou JJ-MM-AAAA
   const d1 = texte.match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
   if (d1) {
     const j = +d1[1], m = +d1[2], a = +d1[3];
     if (j >= 1 && j <= 31 && m >= 1 && m <= 12 && a >= 1900 && a <= 2100)
       return `${d1[3]}-${d1[2]}-${d1[1]}`;
   }
-  // Format compact JJMMAAAA
   const all = texte.replace(/[^0-9]/g, ' ').match(/\b\d{8}\b/g);
   if (all) {
     const valid = all.find(v => {
@@ -76,7 +74,7 @@ const extraireDate = (texte) => {
   return null;
 };
 
-/* ── Extraction principale ──────────────────────────────────────────────── */
+/* ── Blacklist ──────────────────────────────────────────────────────────── */
 
 const BLACKLIST = new Set([
   'REPUBLIQUE','FRANCAISE','FRANÇAISE','SENEGAL','SÉNÉGAL','CARTE','NATIONALE',
@@ -84,30 +82,60 @@ const BLACKLIST = new Set([
   'NATIONALITÉ','CEDEAO','ECOWAS','IDENTITY','CARD','BILHETE','IDENTIDADE',
   'OWAS','TAILLE','LIEU','NAISSANCE','DELIVRANCE','EXPIRATION','CENTRE',
   'ENREGISTREMENT','DOMICILE','ADRESSE','DATE','PRENOM','PRENOMS','COMMUNE',
-  'REBEUSS','MADIABEL','KEUR','COMM','BIRTH','SURNAME','GIVEN','FORENAME',
-  'NAMES','TYPE','PIECE','NUMERO','NUMÉRO','SENEGALAN','SÉNÉGALAISE',
+  'BIRTH','SURNAME','GIVEN','FORENAME','NAMES','TYPE','PIECE','NUMERO','NUMÉRO',
+  'SENEGALAN','SÉNÉGALAISE',
 ]);
 
 const isValidNom = (s) => {
   if (!s) return false;
   const up = s.toUpperCase().trim();
   if (BLACKLIST.has(up)) return false;
-  if (up.length < 2 || up.length > 20) return false;
+  if (up.length < 2 || up.length > 25) return false;
   if (/\d/.test(up)) return false;
   return true;
 };
 
-const valeurApresLabel = (lignes, regex, maxLignes = 3) => {
+/* ── Extraction label → valeur (gère label seul ET label+valeur sur 1 ligne) */
+
+const extraireChamp = (lignes, labelRegex, labelsAIgnorerRegex = null) => {
   for (let i = 0; i < lignes.length; i++) {
-    if (regex.test(lignes[i])) {
-      for (let j = 1; j <= maxLignes; j++) {
-        const l = (lignes[i + j] || '').trim();
-        if (l && l.length > 1) return l;
-      }
+    const ligne = lignes[i];
+    if (!labelRegex.test(ligne)) continue;
+
+    // ── Cas 1 : valeur sur la MÊME ligne après le label ──────────────────
+    // Ex: "Prénoms KHADIM" ou "Nom : FAYE"
+    const apresLabel = ligne
+      .replace(labelRegex, '')       // supprime le label
+      .replace(/^\s*[:\-]?\s*/, '')  // supprime séparateur optionnel
+      .trim();
+
+    if (apresLabel.length >= 2 && !/^\d+$/.test(apresLabel)) {
+      // Extrait les mots valides
+      const mots = apresLabel.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
+      const valides = mots.filter(m => isValidNom(m));
+      if (valides.length > 0) return valides.join(' ');
+    }
+
+    // ── Cas 2 : valeur sur les lignes SUIVANTES ───────────────────────────
+    // Ex: "Prénoms\nKHADIM" ou "Nom\nFAYE"
+    for (let j = 1; j <= 4; j++) {
+      const l = (lignes[i + j] || '').trim();
+      if (!l) continue;
+
+      // Ignore si c'est un autre label connu
+      if (labelsAIgnorerRegex && labelsAIgnorerRegex.test(l)) continue;
+      // Ignore les lignes purement numériques ou trop courtes
+      if (/^\d+$/.test(l) || l.length < 2) continue;
+
+      const mots = l.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
+      const valides = mots.filter(m => isValidNom(m));
+      if (valides.length > 0) return valides.join(' ');
     }
   }
   return null;
 };
+
+/* ── Extraction principale ──────────────────────────────────────────────── */
 
 const extraireInfosPiece = (texte) => {
   const infos = {
@@ -115,30 +143,29 @@ const extraireInfosPiece = (texte) => {
     typePiece: 'CNI', dateNaissance: null,
   };
 
-  // ── Nettoyage global ──────────────────────────────────────────────────────
   const texteClean = texte
     .replace(/\|/g, 'I')
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/0(?=[A-Z])/g, 'O'); // 0 → O devant lettre
+    .replace(/[\u2018\u2019]/g, "'");
 
   const lignes = texteClean.split('\n').map(l => l.trim()).filter(Boolean);
   const upper  = texteClean.toUpperCase();
 
   // ── Type de pièce ─────────────────────────────────────────────────────────
-  if (upper.includes('PASSEPORT'))                                          infos.typePiece = 'PASSEPORT';
-  else if (upper.includes('PERMIS DE CONDUIRE'))                            infos.typePiece = 'PERMIS';
-  else if (upper.includes("CARTE D'IDENTITE") || upper.includes('CARTE NATIONALE')
-        || upper.includes('CEDEAO') || upper.includes('ECOWAS')
-        || upper.includes('IDENTITY CARD') || upper.includes('CNI'))        infos.typePiece = 'CNI';
-  else if (upper.includes('SEJOUR'))                                        infos.typePiece = 'CARTE_SEJOUR';
+  if (upper.includes('PASSEPORT'))                                     infos.typePiece = 'PASSEPORT';
+  else if (upper.includes('PERMIS DE CONDUIRE'))                       infos.typePiece = 'PERMIS';
+  else if (upper.includes("CARTE D'IDENTITE")
+        || upper.includes('CARTE NATIONALE')
+        || upper.includes('CEDEAO')
+        || upper.includes('ECOWAS')
+        || upper.includes('IDENTITY CARD')
+        || upper.includes('CNI'))                                       infos.typePiece = 'CNI';
+  else if (upper.includes('SEJOUR'))                                   infos.typePiece = 'CARTE_SEJOUR';
 
   // ── Date de naissance ─────────────────────────────────────────────────────
   for (let i = 0; i < lignes.length; i++) {
     if (/date\s*de\s*naiss|date\s*of\s*birth/i.test(lignes[i])) {
-      // Cherche une date sur la même ligne
       const meme = lignes[i].match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
       if (meme) { infos.dateNaissance = `${meme[3]}-${meme[2]}-${meme[1]}`; break; }
-      // Ou sur les lignes suivantes
       for (let j = 1; j <= 3; j++) {
         const d = extraireDate(lignes[i + j] || '');
         if (d) { infos.dateNaissance = d; break; }
@@ -148,105 +175,46 @@ const extraireInfosPiece = (texte) => {
   }
   if (!infos.dateNaissance) infos.dateNaissance = extraireDate(texteClean);
 
-  // ── PRÉNOM : stratégie stricte label → ligne suivante ────────────────────
-  // Stratégie 1 : label seul sur une ligne, valeur en dessous
-  for (let i = 0; i < lignes.length; i++) {
-    if (/^Pr[ée]noms?\s*[:\-]?\s*$/i.test(lignes[i])) {
-      for (let j = 1; j <= 3; j++) {
-        let l = (lignes[i + j] || '').trim();
-        // Ignore les lignes qui ressemblent à des labels
-        if (/^(Nom|Date|Sexe|Taille|Lieu|N°|Carte)/i.test(l)) continue;
-        l = l.replace(/^[^A-ZÀ-ÿa-zà-ÿ]+/, '').replace(/\d/g, '').replace(/[-–—]+/g, ' ').trim();
-        if (l.length >= 2) { infos.prenom = nettoyer(l); break; }
-      }
-      if (infos.prenom) break;
-    }
-  }
+  // Labels à ignorer quand on cherche la valeur suivante
+  const LABELS_REGEX = /^(Pr[ée]noms?|Nom|Date|Sexe|Taille|Lieu|N[°º]|Carte|Birth|Surname|Given|Forename)\b/i;
 
-  // Stratégie 2 : label + valeur sur la même ligne
-  if (!infos.prenom) {
-    for (const l of lignes) {
-      const m = l.match(/Pr[ée]noms?\s*[:\-]\s*(.+)/i);
-      if (m && m[1].trim().length >= 2) {
-        const val = nettoyer(m[1]);
-        if (val && isValidNom(val)) { infos.prenom = val; break; }
-      }
-    }
-  }
+  // ── PRÉNOM ────────────────────────────────────────────────────────────────
+  const prenomBrut = extraireChamp(
+    lignes,
+    /Pr[ée]noms?\s*[:\-]?|Given\s*names?\s*[:\-]?|Forenames?\s*[:\-]?/i,
+    LABELS_REGEX
+  );
+  if (prenomBrut) infos.prenom = nettoyer(prenomBrut);
 
-  // Stratégie 3 : label sur une ligne, valeur tout en majuscules en dessous
-  if (!infos.prenom) {
-    for (let i = 0; i < lignes.length; i++) {
-      if (/Pr[ée]noms?|Given|Forename/i.test(lignes[i])) {
-        for (let j = 1; j <= 4; j++) {
-          const l = (lignes[i + j] || '').trim();
-          if (!l || /^(Nom|Date|Sexe|N°|Carte)/i.test(l)) continue;
-          const mots = l.match(/\b[A-ZÀ-Ÿ]{2,}\b/g);
-          if (mots) {
-            const valide = mots.filter(m => isValidNom(m));
-            if (valide.length > 0) { infos.prenom = nettoyer(valide.join(' ')); break; }
-          }
-        }
-        if (infos.prenom) break;
-      }
-    }
-  }
+  // ── NOM ───────────────────────────────────────────────────────────────────
+  const nomBrut = extraireChamp(
+    lignes,
+    /^Nom\s*[:\-]?$|^Nom\s+[A-Z]|Surname\s*[:\-]?|Last\s*name\s*[:\-]?/i,
+    LABELS_REGEX
+  );
+  if (nomBrut) infos.nom = nettoyer(nomBrut);
 
-  // ── NOM : idem, label → ligne suivante ───────────────────────────────────
-  // Stratégie 1 : label seul "Nom" suivi de la valeur
-  for (let i = 0; i < lignes.length; i++) {
-    // Le label "Nom" seul (pas "Nom de..." ou "Nommer")
-    if (/^Nom\s*[:\-]?\s*$/i.test(lignes[i])) {
-      for (let j = 1; j <= 3; j++) {
-        const l = (lignes[i + j] || '').trim();
-        if (!l || /^(Pr[ée]nom|Date|Sexe|N°)/i.test(l)) continue;
-        const mots = l.match(/\b[A-ZÀ-Ÿ]{2,}\b/g);
-        if (mots) {
-          const valide = mots.filter(m => isValidNom(m));
-          if (valide.length > 0) { infos.nom = nettoyer(valide[0]); break; }
-        }
-      }
-      if (infos.nom) break;
-    }
-  }
-
-  // Stratégie 2 : "Nom : VALEUR" sur la même ligne
-  if (!infos.nom) {
-    for (const l of lignes) {
-      const m = l.match(/^Nom\s*[:\-]\s*([A-ZÀ-Ÿa-zà-ÿ\-\s]+)/i);
-      if (m) {
-        const val = nettoyer(m[1]);
-        if (val && isValidNom(val)) { infos.nom = val; break; }
-      }
-    }
-  }
-
-  // Stratégie 3 : fallback — mots entièrement en majuscules après le prénom trouvé
+  // ── NOM fallback : mot majuscule après le prénom dans le texte brut ───────
   if (!infos.nom && infos.prenom) {
-    const prenomPos = texteClean.toUpperCase().indexOf(infos.prenom.toUpperCase());
-    if (prenomPos !== -1) {
-      const apres = texteClean.slice(prenomPos + infos.prenom.length);
+    const prenomUpper = infos.prenom.toUpperCase();
+    const pos = upper.indexOf(prenomUpper);
+    if (pos !== -1) {
+      const apres = texteClean.slice(pos + infos.prenom.length);
       const candidats = apres.match(/\b[A-ZÀ-Ÿ]{2,}\b/g) || [];
-      const val = candidats.find(c => isValidNom(c) && c !== infos.prenom.toUpperCase());
+      const val = candidats.find(c => isValidNom(c) && c !== prenomUpper);
       if (val) infos.nom = nettoyer(val);
     }
   }
 
   // ── Numéro de pièce ───────────────────────────────────────────────────────
-  // CNI sénégalaise : "1 06 19941018 00015 4" → on joint tous les chiffres
   for (let i = 0; i < lignes.length; i++) {
     if (/N[°º\.]\s*de\s*la\s*carte|carte\s*d.identit/i.test(lignes[i])) {
-      // Sur la même ligne
-      const meme = lignes[i].match(/[\d\s]{6,}/);
-      if (meme) {
-        const code = meme[0].replace(/\s+/g, '');
-        if (code.length >= 6) { infos.numeroPiece = code; break; }
-      }
-      // Sur les lignes suivantes
+      // Même ligne
+      const meme = lignes[i].match(/[\d][\d\s]{5,}/);
+      if (meme) { infos.numeroPiece = meme[0].replace(/\s+/g, ''); break; }
+      // Lignes suivantes
       for (let j = 1; j <= 4; j++) {
-        const l = (lignes[i + j] || '');
-        // Capture une séquence de chiffres et espaces d'au moins 6 chiffres
-        const m = l.match(/[\d][\d\s]{5,}/);
+        const m = (lignes[i + j] || '').match(/[\d][\d\s]{5,}/);
         if (m) {
           const code = m[0].replace(/\s+/g, '');
           if (code.length >= 6) { infos.numeroPiece = code; break; }
@@ -256,28 +224,25 @@ const extraireInfosPiece = (texte) => {
     }
   }
 
-  // Fallback : cherche "N° du document" ou "Document No"
   if (!infos.numeroPiece) {
     for (let i = 0; i < lignes.length; i++) {
       if (/N[°º]\s*DU\s*DOCUMENT|Document\s*No/i.test(lignes[i])) {
         for (let j = 0; j <= 4; j++) {
-          const l = lignes[i + j] || '';
-          const m = (l.match(/\b([A-Z0-9]{6,15})\b/g) || [])
-            .find(c => /[A-Z]/.test(c) && /[0-9]/.test(c));
-          if (m) { infos.numeroPiece = m; break; }
+          const m = (lignes[i + j] || '').match(/\b([A-Z0-9]{6,15})\b/g);
+          const code = (m || []).find(c => /[A-Z]/.test(c) && /[0-9]/.test(c));
+          if (code) { infos.numeroPiece = code; break; }
         }
         if (infos.numeroPiece) break;
       }
     }
   }
 
-  // Fallback final : motif alphanumérique générique
   if (!infos.numeroPiece) {
     const m = texteClean.match(/\b([A-Z][A-Z0-9]{5,14})\b/g);
     if (m) infos.numeroPiece = m.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c)) || null;
   }
 
-  // ── MRZ fallback pour nom/prénom ──────────────────────────────────────────
+  // ── MRZ fallback ──────────────────────────────────────────────────────────
   if (!infos.nom || !infos.prenom) {
     const mrzLines = lignes.filter(l => /^[A-Z<]{20,}/.test(l));
     if (mrzLines.length > 0) {
