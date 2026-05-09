@@ -1,5 +1,11 @@
-const Tesseract  = require('tesseract.js');
+const vision = require('@google-cloud/vision');
 const { Document } = require('../models');
+
+const visionClient = new vision.ImageAnnotatorClient({
+  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+  // OU directement avec les credentials JSON :
+  // credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
+});
 
 const scannerImage = async (req, res) => {
   try {
@@ -16,11 +22,9 @@ const scannerImage = async (req, res) => {
       tailleFichier: req.file.size,
     });
 
-    const { data: { text } } = await Tesseract.recognize(
-      cheminFichier,
-      'fra+eng',
-      { logger: () => {}, tessedit_pageseg_mode: 6 }
-    );
+    // ✅ Google Vision au lieu de Tesseract
+    const [result] = await visionClient.textDetection(cheminFichier);
+    const text = result.fullTextAnnotation?.text || '';
 
     console.log('📄 OCR RAW:\n', text);
 
@@ -40,6 +44,7 @@ const scannerImage = async (req, res) => {
     });
 
   } catch (err) {
+    console.error('Scan error:', err);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -95,38 +100,30 @@ const isValidNom = (s) => {
   return true;
 };
 
-/* ── Extraction label → valeur (gère label seul ET label+valeur sur 1 ligne) */
+/* ── Extraction label → valeur ──────────────────────────────────────────── */
 
 const extraireChamp = (lignes, labelRegex, labelsAIgnorerRegex = null) => {
   for (let i = 0; i < lignes.length; i++) {
     const ligne = lignes[i];
-    if (!labelRegex.test(ligne)) continue;
+    const match = ligne.match(labelRegex);
+    if (!match) continue;
 
-    // ── Cas 1 : valeur sur la MÊME ligne après le label ──────────────────
-    // Ex: "Prénoms KHADIM" ou "Nom : FAYE"
     const apresLabel = ligne
-      .replace(labelRegex, '')       // supprime le label
-      .replace(/^\s*[:\-]?\s*/, '')  // supprime séparateur optionnel
+      .slice(match.index + match[0].length)
+      .replace(/^\s*[:\-]?\s*/, '')
       .trim();
 
     if (apresLabel.length >= 2 && !/^\d+$/.test(apresLabel)) {
-      // Extrait les mots valides
       const mots = apresLabel.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
       const valides = mots.filter(m => isValidNom(m));
       if (valides.length > 0) return valides.join(' ');
     }
 
-    // ── Cas 2 : valeur sur les lignes SUIVANTES ───────────────────────────
-    // Ex: "Prénoms\nKHADIM" ou "Nom\nFAYE"
     for (let j = 1; j <= 4; j++) {
       const l = (lignes[i + j] || '').trim();
       if (!l) continue;
-
-      // Ignore si c'est un autre label connu
       if (labelsAIgnorerRegex && labelsAIgnorerRegex.test(l)) continue;
-      // Ignore les lignes purement numériques ou trop courtes
       if (/^\d+$/.test(l) || l.length < 2) continue;
-
       const mots = l.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
       const valides = mots.filter(m => isValidNom(m));
       if (valides.length > 0) return valides.join(' ');
@@ -151,15 +148,15 @@ const extraireInfosPiece = (texte) => {
   const upper  = texteClean.toUpperCase();
 
   // ── Type de pièce ─────────────────────────────────────────────────────────
-  if (upper.includes('PASSEPORT'))                                     infos.typePiece = 'PASSEPORT';
-  else if (upper.includes('PERMIS DE CONDUIRE'))                       infos.typePiece = 'PERMIS';
+  if (upper.includes('PASSEPORT'))                   infos.typePiece = 'PASSEPORT';
+  else if (upper.includes('PERMIS DE CONDUIRE'))     infos.typePiece = 'PERMIS';
   else if (upper.includes("CARTE D'IDENTITE")
         || upper.includes('CARTE NATIONALE')
         || upper.includes('CEDEAO')
         || upper.includes('ECOWAS')
         || upper.includes('IDENTITY CARD')
-        || upper.includes('CNI'))                                       infos.typePiece = 'CNI';
-  else if (upper.includes('SEJOUR'))                                   infos.typePiece = 'CARTE_SEJOUR';
+        || upper.includes('CNI'))                    infos.typePiece = 'CNI';
+  else if (upper.includes('SEJOUR'))                 infos.typePiece = 'CARTE_SEJOUR';
 
   // ── Date de naissance ─────────────────────────────────────────────────────
   for (let i = 0; i < lignes.length; i++) {
@@ -175,7 +172,6 @@ const extraireInfosPiece = (texte) => {
   }
   if (!infos.dateNaissance) infos.dateNaissance = extraireDate(texteClean);
 
-  // Labels à ignorer quand on cherche la valeur suivante
   const LABELS_REGEX = /^(Pr[ée]noms?|Nom|Date|Sexe|Taille|Lieu|N[°º]|Carte|Birth|Surname|Given|Forename)\b/i;
 
   // ── PRÉNOM ────────────────────────────────────────────────────────────────
@@ -189,12 +185,12 @@ const extraireInfosPiece = (texte) => {
   // ── NOM ───────────────────────────────────────────────────────────────────
   const nomBrut = extraireChamp(
     lignes,
-    /^Nom\s*[:\-]?$|^Nom\s+[A-Z]|Surname\s*[:\-]?|Last\s*name\s*[:\-]?/i,
+    /\bNom\b\s*[:\-]?|\bSurname\b\s*[:\-]?|\bLast\s*name\b\s*[:\-]?/i,
     LABELS_REGEX
   );
   if (nomBrut) infos.nom = nettoyer(nomBrut);
 
-  // ── NOM fallback : mot majuscule après le prénom dans le texte brut ───────
+  // Fallback nom
   if (!infos.nom && infos.prenom) {
     const prenomUpper = infos.prenom.toUpperCase();
     const pos = upper.indexOf(prenomUpper);
@@ -209,10 +205,8 @@ const extraireInfosPiece = (texte) => {
   // ── Numéro de pièce ───────────────────────────────────────────────────────
   for (let i = 0; i < lignes.length; i++) {
     if (/N[°º\.]\s*de\s*la\s*carte|carte\s*d.identit/i.test(lignes[i])) {
-      // Même ligne
       const meme = lignes[i].match(/[\d][\d\s]{5,}/);
       if (meme) { infos.numeroPiece = meme[0].replace(/\s+/g, ''); break; }
-      // Lignes suivantes
       for (let j = 1; j <= 4; j++) {
         const m = (lignes[i + j] || '').match(/[\d][\d\s]{5,}/);
         if (m) {
