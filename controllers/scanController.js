@@ -2,9 +2,7 @@ const vision = require('@google-cloud/vision');
 const { Document } = require('../models');
 
 const visionClient = new vision.ImageAnnotatorClient({
-  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-  // OU directement avec les credentials JSON :
-  // credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
 });
 
 const scannerImage = async (req, res) => {
@@ -22,7 +20,6 @@ const scannerImage = async (req, res) => {
       tailleFichier: req.file.size,
     });
 
-    // ✅ Google Vision au lieu de Tesseract
     const [result] = await visionClient.textDetection(cheminFichier);
     const text = result.fullTextAnnotation?.text || '';
 
@@ -148,15 +145,15 @@ const extraireInfosPiece = (texte) => {
   const upper  = texteClean.toUpperCase();
 
   // ── Type de pièce ─────────────────────────────────────────────────────────
-  if (upper.includes('PASSEPORT'))                   infos.typePiece = 'PASSEPORT';
-  else if (upper.includes('PERMIS DE CONDUIRE'))     infos.typePiece = 'PERMIS';
+  if (upper.includes('PASSEPORT'))               infos.typePiece = 'PASSEPORT';
+  else if (upper.includes('PERMIS DE CONDUIRE')) infos.typePiece = 'PERMIS';
   else if (upper.includes("CARTE D'IDENTITE")
         || upper.includes('CARTE NATIONALE')
         || upper.includes('CEDEAO')
         || upper.includes('ECOWAS')
         || upper.includes('IDENTITY CARD')
-        || upper.includes('CNI'))                    infos.typePiece = 'CNI';
-  else if (upper.includes('SEJOUR'))                 infos.typePiece = 'CARTE_SEJOUR';
+        || upper.includes('CNI'))                infos.typePiece = 'CNI';
+  else if (upper.includes('SEJOUR'))             infos.typePiece = 'CARTE_SEJOUR';
 
   // ── Date de naissance ─────────────────────────────────────────────────────
   for (let i = 0; i < lignes.length; i++) {
