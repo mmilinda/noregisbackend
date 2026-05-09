@@ -6,7 +6,7 @@ const { Document } = require('../models');
 const MINDEE_API_KEY = process.env.MINDEE_API_KEY;
 const mindeeClient = new mindee.Client({ apiKey: MINDEE_API_KEY });
 
-// Prétraitement
+// Prétraitement de l'image
 async function preparerImage(imagePath) {
   const outputPath = imagePath + '_prepared.jpg';
   try {
@@ -22,20 +22,21 @@ async function preparerImage(imagePath) {
   }
 }
 
-// Appel Mindee (International ID, prêt à l'emploi)
+// Appel Mindee v5 (International ID)
 async function extraireAvecMindee(imagePath) {
   try {
-    const inputSource = new mindee.PathInput({ inputPath: imagePath });
-    const response = await mindeeClient.enqueueAndGetResult(
+    const inputSource = mindeeClient.docFromPath(imagePath);
+
+    const response = await mindeeClient.enqueueAndParse(
       mindee.product.InternationalIdV2,
-      inputSource,
-      { confidence: true }
+      inputSource
     );
 
     // 🔍 Affiche la réponse brute de Mindee (tous les champs reconnus)
     console.log('📡 Réponse Mindee brute :', JSON.stringify(response.document.inference.prediction, null, 2));
 
     const p = response.document.inference.prediction;
+
     return {
       nom: p.last_name?.value || p.surnames?.[0]?.value || null,
       prenom: p.first_name?.value || p.given_names?.[0]?.value || null,
@@ -57,43 +58,87 @@ async function extraireAvecMindee(imagePath) {
   } catch (error) {
     console.error('Mindee error:', error.response?.data || error.message);
     return {
-      nom: null, prenom: null, numeroPiece: null, dateNaissance: null,
-      dateExpiration: null, sexe: null, nationalite: null, typePiece: 'INCONNU',
-      paysEmission: null, adresse: null, mrz: null,
+      nom: null,
+      prenom: null,
+      numeroPiece: null,
+      dateNaissance: null,
+      dateExpiration: null,
+      sexe: null,
+      nationalite: null,
+      typePiece: 'INCONNU',
+      paysEmission: null,
+      adresse: null,
+      mrz: null,
       confiance: { nom: 0, prenom: 0, numero: 0 },
     };
   }
 }
 
+// Correspondance type de document
 function getTypeDocument(type) {
-  const map = { ID_CARD: 'CNI', PASSPORT: 'PASSEPORT', DRIVER_LICENSE: 'PERMIS', RESIDENCE_PERMIT: 'CARTE_SEJOUR' };
+  const map = {
+    ID_CARD: 'CNI',
+    PASSPORT: 'PASSEPORT',
+    DRIVER_LICENSE: 'PERMIS',
+    RESIDENCE_PERMIT: 'CARTE_SEJOUR'
+  };
   return map[type] || type || 'CNI';
 }
 
+// Contrôleur principal
 const scannerImage = async (req, res) => {
-  let originalPath = null, preparedPath = null;
+  let originalPath = null;
+  let preparedPath = null;
+
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image' });
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Aucune image fournie' });
+    }
+
     originalPath = req.file.path;
     preparedPath = await preparerImage(originalPath);
+
     const document = await Document.create({
       nomFichier: req.file.filename,
       cheminFichier: preparedPath,
       typeMime: req.file.mimetype,
       tailleFichier: fs.statSync(preparedPath).size,
     });
+
     const infos = await extraireAvecMindee(preparedPath);
+
     const io = req.app.get('io');
-    if (io) io.emit('ocr:donnees', { infosExtraites: infos, nomFichier: document.nomFichier });
-    res.json({ success: true, message: 'Scan terminé', document: { id: document._id, nomFichier: document.nomFichier }, infosExtraites: infos });
+    if (io) {
+      io.emit('ocr:donnees', {
+        infosExtraites: infos,
+        nomFichier: document.nomFichier
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Scan terminé avec succès',
+      document: {
+        id: document._id,
+        nomFichier: document.nomFichier
+      },
+      infosExtraites: infos
+    });
+
   } catch (err) {
-    console.error(err);
+    console.error('Erreur scannerImage:', err);
     res.status(500).json({ success: false, message: err.message });
   } finally {
     try {
-      if (originalPath && fs.existsSync(originalPath)) fs.unlinkSync(originalPath);
-      if (preparedPath && preparedPath !== originalPath && fs.existsSync(preparedPath)) fs.unlinkSync(preparedPath);
-    } catch (e) { console.error('Cleanup error', e); }
+      if (originalPath && fs.existsSync(originalPath)) {
+        fs.unlinkSync(originalPath);
+      }
+      if (preparedPath && preparedPath !== originalPath && fs.existsSync(preparedPath)) {
+        fs.unlinkSync(preparedPath);
+      }
+    } catch (e) {
+      console.error('Cleanup error:', e);
+    }
   }
 };
 
