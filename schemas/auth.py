@@ -1,12 +1,15 @@
 from pydantic import BaseModel, Field
 from typing import Literal
 
+
 class LoginBody(BaseModel):
     email: str
-    password: str = Field(..., alias="motDePasse")  # alias pour accepter "motDePasse"
+    # ✅ accepte "motDePasse" depuis le frontend (Node.js convention)
+    password: str = Field(..., alias="motDePasse")
 
     class Config:
-        populate_by_name = True  # permet d'utiliser aussi "password" si besoin
+        populate_by_name = True
+
 
 class RegisterBody(BaseModel):
     nom: str

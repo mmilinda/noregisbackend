@@ -6,10 +6,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from socketio import ASGIApp
 
 load_dotenv()
 
-# ── SOCKET.IO ─────────────────────────────
+# ── SOCKET.IO ─────────────────────────────────────────────────────────────────
 sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
 
 @sio.event
@@ -21,7 +22,7 @@ async def disconnect(sid):
     print(f"🔴 Socket déconnecté : {sid}")
 
 
-# ── DB LIFESPAN ───────────────────────────
+# ── DB LIFESPAN ───────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from config.database import connect_db
@@ -29,48 +30,54 @@ async def lifespan(app: FastAPI):
     yield
 
 
-# ── FASTAPI APP ───────────────────────────
-app = FastAPI(
+# ── FASTAPI APP ───────────────────────────────────────────────────────────────
+fastapi_app = FastAPI(
     title="Registre Visiteurs API",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-app.state.sio = sio
+fastapi_app.state.sio = sio
 
+# ── CORS ─────────────────────────────────────────────────────────────────────
+# ✅ Accepte le frontend Vercel + localhost en dev
+ORIGINS = [
+    "https://noregis.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+]
 
-# ── CORS ──────────────────────────────────
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# ── STATIC ────────────────────────────────
+# ── STATIC FILES ──────────────────────────────────────────────────────────────
 os.makedirs("uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+fastapi_app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-
-# ── ROUTES ────────────────────────────────
+# ── ROUTES ────────────────────────────────────────────────────────────────────
 from routes import auth, visiteurs, visites, scan, search
 
-app.include_router(auth.router, prefix="/api/auth")
-app.include_router(visiteurs.router, prefix="/api/visiteurs")
-app.include_router(visites.router, prefix="/api/visites")
-app.include_router(scan.router, prefix="/api/scan")
-app.include_router(search.router, prefix="/api/search")
+fastapi_app.include_router(auth.router,      prefix="/api/auth")
+fastapi_app.include_router(visiteurs.router, prefix="/api/visiteurs")
+fastapi_app.include_router(visites.router,   prefix="/api/visites")
+fastapi_app.include_router(scan.router,      prefix="/api/scan")
+fastapi_app.include_router(search.router,    prefix="/api/search")
 
 
-# ── ROOT ──────────────────────────────────
-@app.get("/")
+# ── ROOT ──────────────────────────────────────────────────────────────────────
+@fastapi_app.get("/")
 async def root():
-    return {"message": "API OK", "version": "1.0.0"}
+    return {"message": "Registre Visiteurs API — OK", "version": "1.0.0"}
 
 
-# ── ERROR HANDLER ─────────────────────────
-@app.exception_handler(Exception)
+# ── GLOBAL ERROR HANDLER ──────────────────────────────────────────────────────
+@fastapi_app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
@@ -78,8 +85,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# ── SOCKET WRAPPER (IMPORTANT FIX) ────────
-# 👉 ceci remplace socketio.ASGIApp proprement
-from socketio import ASGIApp
+# ── APP ASGI FINALE ───────────────────────────────────────────────────────────
+# ✅ Renommé en `app` pour que Render/uvicorn le détecte correctement
+app = ASGIApp(sio, other_asgi_app=fastapi_app)
 
-socket_app = ASGIApp(sio, other_asgi_app=app)
+
+# ── DÉMARRAGE DIRECT ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 3000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

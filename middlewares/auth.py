@@ -3,13 +3,11 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from bson import ObjectId
-
 from models.utilisateur import Utilisateur
 
 bearer_scheme = HTTPBearer()
 
 
-# ───────── AUTHENTIFICATION ─────────
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> Utilisateur:
@@ -21,16 +19,12 @@ async def get_current_user(
             os.getenv("JWT_SECRET"),
             algorithms=["HS256"],
         )
-
         user_id = payload.get("id")
-
         if not user_id:
             raise HTTPException(status_code=401, detail="Token invalide.")
-
     except JWTError:
         raise HTTPException(status_code=401, detail="Token invalide ou expiré.")
 
-    # ⚠️ conversion ObjectId (IMPORTANT BEANIE)
     try:
         utilisateur = await Utilisateur.get(ObjectId(user_id))
     except Exception:
@@ -42,7 +36,6 @@ async def get_current_user(
     return utilisateur
 
 
-# ───────── CHECK ADMIN ─────────
 def est_admin(utilisateur: Utilisateur = Depends(get_current_user)) -> Utilisateur:
     if utilisateur.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Accès refusé.")

@@ -7,14 +7,15 @@ from pydantic import Field
 class Visiteur(Document):
     nom: str = Field(..., max_length=100)
     prenom: str = Field(..., max_length=100)
-    date_naissance: Optional[datetime] = None
-    numero_piece: str = Field(..., max_length=100)
-    type_piece: Literal["CNI", "PASSEPORT", "PERMIS", "CARTE_SEJOUR"] = "CNI"
+
+    # ✅ Alias = noms exacts dans MongoDB (venant de Node.js)
+    date_naissance: Optional[datetime] = Field(None, alias="dateNaissance")
+    numero_piece: str = Field(..., max_length=100, alias="numeroPiece")
+    type_piece: Literal["CNI", "PASSEPORT", "PERMIS", "CARTE_SEJOUR"] = Field("CNI", alias="typePiece")
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     class Settings:
         name = "visiteurs"
-        indexes = [
-            [("numero_piece", 1)],  # unique géré manuellement
-        ]
+        populate_by_name = True  # ✅

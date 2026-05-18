@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 from fastapi import HTTPException
 from pydantic import BaseModel
 from bson import ObjectId
@@ -6,8 +7,6 @@ from models.visiteur import Visiteur
 from models.visite import Visite
 from models.document import DocumentScan
 
-
-# ── Schémas ───────────────────────────────────────────────────────────────────
 
 class VisiteurBody(BaseModel):
     nom: str
@@ -25,28 +24,23 @@ class VisiteurUpdate(BaseModel):
     type_piece: Optional[str] = None
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 def _visiteur_dict(v: Visiteur) -> dict:
-    d = v.dict()
+    d = v.dict(by_alias=False)
     d["id"] = str(v.id)
     d.pop("_id", None)
     return d
 
 
-# ── Handlers ──────────────────────────────────────────────────────────────────
-
 async def creer_visiteur(body: VisiteurBody):
     existe = await Visiteur.find_one(Visiteur.numero_piece == body.numero_piece)
     if existe:
         return {
-            "success": True,
-            "message": "Visiteur déjà enregistré.",
-            "visiteur": _visiteur_dict(existe),
+            "success":    True,
+            "message":    "Visiteur déjà enregistré.",
+            "visiteur":   _visiteur_dict(existe),
             "est_nouveau": False,
         }
 
-    from datetime import datetime
     date_naissance = None
     if body.date_naissance:
         try:
@@ -63,22 +57,29 @@ async def creer_visiteur(body: VisiteurBody):
     )
     await visiteur.insert()
     return {
-        "success": True,
-        "message": "Visiteur créé.",
-        "visiteur": _visiteur_dict(visiteur),
+        "success":    True,
+        "message":    "Visiteur créé.",
+        "visiteur":   _visiteur_dict(visiteur),
         "est_nouveau": True,
     }
 
 
 async def lister_visiteurs(page: int = 1, limit: int = 20):
     skip = (page - 1) * limit
-    total = await Visiteur.count()
-    visiteurs = await Visiteur.find_all().sort(-Visiteur.created_at).skip(skip).limit(limit).to_list()
+    # ✅ Beanie : find().count() et non Visiteur.count()
+    total = await Visiteur.find().count()
+    visiteurs = (
+        await Visiteur.find()
+        .sort(-Visiteur.created_at)
+        .skip(skip)
+        .limit(limit)
+        .to_list()
+    )
     return {
-        "success": True,
-        "total": total,
-        "page": page,
-        "pages": -(-total // limit),  # ceil division
+        "success":  True,
+        "total":    total,
+        "page":     page,
+        "pages":    -(-total // limit),
         "visiteurs": [_visiteur_dict(v) for v in visiteurs],
     }
 
@@ -93,12 +94,12 @@ async def get_visiteur(visiteur_id: str):
     if not visiteur:
         raise HTTPException(status_code=404, detail="Visiteur introuvable.")
 
-    visites = await Visite.find(Visite.visiteur_id == oid).sort(-Visite.heure_entree).to_list()
+    visites   = await Visite.find(Visite.visiteur_id == oid).sort(-Visite.heure_entree).to_list()
     documents = await DocumentScan.find(DocumentScan.visiteur_id == oid).to_list()
 
     d = _visiteur_dict(visiteur)
-    d["visites"] = [v.dict() for v in visites]
-    d["documents"] = [doc.dict() for doc in documents]
+    d["visites"]   = [v.dict(by_alias=False) for v in visites]
+    d["documents"] = [doc.dict(by_alias=False) for doc in documents]
     return {"success": True, "visiteur": d}
 
 
@@ -116,8 +117,6 @@ async def modifier_visiteur(visiteur_id: str, body: VisiteurUpdate):
     for key, val in update_data.items():
         setattr(visiteur, key, val)
 
-    from datetime import datetime
     visiteur.updated_at = datetime.utcnow()
     await visiteur.save()
-
     return {"success": True, "message": "Visiteur mis à jour.", "visiteur": _visiteur_dict(visiteur)}
