@@ -4,8 +4,8 @@ from beanie import Document, PydanticObjectId
 from pydantic import Field
 
 class Visite(Document):
-    visiteur_id: PydanticObjectId
-    personne_visitee: str = Field(..., max_length=150)
+    visiteur_id: Optional[PydanticObjectId] = None
+    personne_visitee: Optional[str] = None
     service: str = Field(..., max_length=100)
     heure_entree: datetime = Field(default_factory=datetime.utcnow)
     heure_sortie: Optional[datetime] = None
