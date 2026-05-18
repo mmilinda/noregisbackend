@@ -3,12 +3,13 @@ from datetime import datetime
 from beanie import Document
 from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Remplacer bcrypt par sha256_crypt
+pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 
 class Utilisateur(Document):
     nom: str
     email: str
-    mot_de_passe: Optional[str] = None  # ⚠️ optionnel pour éviter erreur de validation
+    mot_de_passe: Optional[str] = None
     role: Literal["AGENT", "ADMIN"] = "AGENT"
     is_actif: bool = True
     created_at: datetime = datetime.utcnow()
