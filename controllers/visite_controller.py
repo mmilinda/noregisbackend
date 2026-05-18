@@ -65,40 +65,56 @@ async def enregistrer_sortie(visite_id: str):
     return {"success": True, "message": f"Sortie enregistrée. Durée : {duree_minutes} min.", "visite": d}
 
 async def lister_visites(statut: Optional[str] = None, date: Optional[str] = None, page: int = 1, limit: int = 20):
-    filtre = {}
-    if statut:
-        filtre["statut"] = statut
-    if date:
-        debut = datetime.fromisoformat(date + "T00:00:00")
-        fin = datetime.fromisoformat(date + "T23:59:59")
-        filtre["heure_entree"] = {"$gte": debut, "$lte": fin}
-    skip = (page - 1) * limit
-    query = Visite.find()
-    if filtre.get("statut"):
-        query = query.find(Visite.statut == filtre["statut"])
-    if filtre.get("heure_entree"):
-        query = query.find(
-            Visite.heure_entree >= filtre["heure_entree"]["$gte"],
-            Visite.heure_entree <= filtre["heure_entree"]["$lte"],
-        )
-    total = await query.count()
-    visites = await query.sort(-Visite.heure_entree).skip(skip).limit(limit).to_list()
-    results = []
-    for v in visites:
-        d = _visite_dict(v)
-        visiteur = await Visiteur.get(v.visiteur_id)
-        if visiteur:
-            d["visiteur"] = visiteur.dict()
-        results.append(d)
-    return {"success": True, "total": total, "page": page, "pages": -(-total // limit), "visites": results}
+    try:
+        # Construction du filtre
+        filter_query = {}
+        if statut:
+            filter_query["statut"] = statut
+        if date:
+            try:
+                debut = datetime.fromisoformat(date + "T00:00:00")
+                fin = datetime.fromisoformat(date + "T23:59:59")
+                filter_query["heure_entree"] = {"$gte": debut, "$lte": fin}
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Format de date invalide. Utilisez YYYY-MM-DD.")
+        
+        # Requête de base
+        query = Visite.find(filter_query)
+        total = await query.count()
+        skip = (page - 1) * limit
+        visites = await query.sort(-Visite.heure_entree).skip(skip).limit(limit).to_list()
+        
+        # Chargement des visiteurs associés
+        results = []
+        for v in visites:
+            d = _visite_dict(v)
+            visiteur = await Visiteur.get(v.visiteur_id)
+            if visiteur:
+                d["visiteur"] = visiteur.dict()
+            results.append(d)
+        
+        return {
+            "success": True,
+            "total": total,
+            "page": page,
+            "pages": (total + limit - 1) // limit,
+            "visites": results,
+        }
+    except Exception as e:
+        print(f"Erreur dans lister_visites: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
 
 async def visites_en_cours():
-    visites = await Visite.find(Visite.statut == "EN_COURS").sort(-Visite.heure_entree).to_list()
-    results = []
-    for v in visites:
-        d = _visite_dict(v)
-        visiteur = await Visiteur.get(v.visiteur_id)
-        if visiteur:
-            d["visiteur"] = visiteur.dict()
-        results.append(d)
-    return {"success": True, "total": len(results), "visites": results}
+    try:
+        visites = await Visite.find(Visite.statut == "EN_COURS").sort(-Visite.heure_entree).to_list()
+        results = []
+        for v in visites:
+            d = _visite_dict(v)
+            visiteur = await Visiteur.get(v.visiteur_id)
+            if visiteur:
+                d["visiteur"] = visiteur.dict()
+            results.append(d)
+        return {"success": True, "total": len(results), "visites": results}
+    except Exception as e:
+        print(f"Erreur dans visites_en_cours: {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur interne: {str(e)}")
