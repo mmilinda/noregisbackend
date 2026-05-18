@@ -4,9 +4,9 @@ from controllers.visite_controller import (
     enregistrer_entree, enregistrer_sortie, lister_visites, visites_en_cours,
     EntreeBody,
 )
-from middlewares.auth import authentifier
+from middlewares.auth import get_current_user
 
-router = APIRouter(tags=["Visites"], dependencies=[Depends(authentifier)])
+router = APIRouter(tags=["Visites"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/")

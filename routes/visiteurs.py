@@ -3,10 +3,10 @@ from controllers.visiteur_controller import (
     creer_visiteur, lister_visiteurs, get_visiteur, modifier_visiteur,
     VisiteurBody, VisiteurUpdate,
 )
-from middlewares.auth import authentifier
+from middlewares.auth import get_current_user
 from models.utilisateur import Utilisateur
 
-router = APIRouter(tags=["Visiteurs"], dependencies=[Depends(authentifier)])
+router = APIRouter(tags=["Visiteurs"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/")

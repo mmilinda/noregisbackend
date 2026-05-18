@@ -1,9 +1,9 @@
 from typing import Optional
 from fastapi import APIRouter, Depends
 from controllers.search_controller import rechercher
-from middlewares.auth import authentifier
+from middlewares.auth import get_current_user
 
-router = APIRouter(tags=["Recherche"], dependencies=[Depends(authentifier)])
+router = APIRouter(tags=["Recherche"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/")

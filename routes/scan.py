@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Request
 from controllers.scan_controller import scanner_image
-from middlewares.auth import authentifier
+from middlewares.auth import get_current_user
 
-router = APIRouter(tags=["Scan"], dependencies=[Depends(authentifier)])
+router = APIRouter(tags=["Scan"], dependencies=[Depends(get_current_user)])
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
 
