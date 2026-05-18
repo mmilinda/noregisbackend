@@ -1,15 +1,9 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
-
+from pydantic import BaseModel
+from typing import Literal
 
 class LoginBody(BaseModel):
     email: str
-    # Accepte aussi bien "password" que "mot_de_passe"
-    password: str = Field(..., alias="mot_de_passe")
-
-    class Config:
-        populate_by_name = True   # permet d'utiliser "password" ou "mot_de_passe" indifféremment
-
+    password: str  # ✅ Plus simple, l'alias 'mot_de_passe' est supprimé
 
 class RegisterBody(BaseModel):
     nom: str
