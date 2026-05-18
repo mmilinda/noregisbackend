@@ -10,10 +10,9 @@ bearer_scheme = HTTPBearer()
 
 
 # ───────── AUTHENTIFICATION ─────────
-async def authentifier(
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> Utilisateur:
-
     token = credentials.credentials
 
     try:
@@ -44,7 +43,7 @@ async def authentifier(
 
 
 # ───────── CHECK ADMIN ─────────
-def est_admin(utilisateur: Utilisateur = Depends(authentifier)) -> Utilisateur:
+def est_admin(utilisateur: Utilisateur = Depends(get_current_user)) -> Utilisateur:
     if utilisateur.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Accès refusé.")
     return utilisateur
