@@ -1,35 +1,49 @@
 import os
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
+from bson import ObjectId
+
 from models.utilisateur import Utilisateur
 
 bearer_scheme = HTTPBearer()
 
 
+# ───────── AUTHENTIFICATION ─────────
 async def authentifier(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> Utilisateur:
+
     token = credentials.credentials
+
     try:
         payload = jwt.decode(
             token,
-            os.getenv("JWT_SECRET", "changeme"),
+            os.getenv("JWT_SECRET"),
             algorithms=["HS256"],
         )
-        user_id: str = payload.get("id")
+
+        user_id = payload.get("id")
+
         if not user_id:
             raise HTTPException(status_code=401, detail="Token invalide.")
+
     except JWTError:
         raise HTTPException(status_code=401, detail="Token invalide ou expiré.")
 
-    utilisateur = await Utilisateur.get(user_id)
+    # ⚠️ conversion ObjectId (IMPORTANT BEANIE)
+    try:
+        utilisateur = await Utilisateur.get(ObjectId(user_id))
+    except Exception:
+        raise HTTPException(status_code=401, detail="ID utilisateur invalide.")
+
     if not utilisateur or not utilisateur.is_actif:
         raise HTTPException(status_code=401, detail="Compte introuvable ou désactivé.")
 
     return utilisateur
 
 
+# ───────── CHECK ADMIN ─────────
 def est_admin(utilisateur: Utilisateur = Depends(authentifier)) -> Utilisateur:
     if utilisateur.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Accès refusé.")

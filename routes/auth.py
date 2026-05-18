@@ -1,21 +1,25 @@
 from fastapi import APIRouter, Depends
-from controllers.auth_controller import login, register, mon_profil, LoginBody, RegisterBody
-from middleware.auth import authentifier
-from models.utilisateur import Utilisateur
+from controllers.auth_controller import login, register, mon_profil
+from schemas.auth import LoginBody, RegisterBody
 
-router = APIRouter(tags=["Auth"])
+from middlewares.auth import get_current_user
+
+router = APIRouter()
 
 
+# ───────── LOGIN ─────────
 @router.post("/login")
-async def route_login(body: LoginBody):
+async def login_route(body: LoginBody):
     return await login(body)
 
 
-@router.post("/register", status_code=201)
-async def route_register(body: RegisterBody):
+# ───────── REGISTER ─────────
+@router.post("/register")
+async def register_route(body: RegisterBody):
     return await register(body)
 
 
-@router.get("/profil")
-async def route_profil(utilisateur: Utilisateur = Depends(authentifier)):
-    return await mon_profil(utilisateur)
+# ───────── PROFILE (MON PROFIL) ─────────
+@router.get("/me")
+async def me_route(user=Depends(get_current_user)):
+    return await mon_profil(user)

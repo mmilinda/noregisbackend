@@ -1,13 +1,14 @@
 from pydantic import BaseModel
+from typing import Optional, Literal
 
 
 class LoginBody(BaseModel):
     email: str
-    password: str   # IMPORTANT côté frontend
+    password: str
 
 
 class RegisterBody(BaseModel):
     nom: str
     email: str
     password: str
-    role: str = "AGENT"
+    role: Literal["AGENT", "ADMIN"] = "AGENT"

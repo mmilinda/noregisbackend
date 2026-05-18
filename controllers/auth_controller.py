@@ -29,7 +29,7 @@ def create_token(user: Utilisateur):
     )
 
 
-# ───────── SERIALIZE USER ─────────
+# ───────── SERIALIZE ─────────
 def serialize_user(user: Utilisateur):
     return {
         "id": str(user.id),
@@ -39,7 +39,7 @@ def serialize_user(user: Utilisateur):
     }
 
 
-# ───────── LOGIN ─────────
+# ───────── LOGIN (FRONT COMPATIBLE) ─────────
 async def login(body: LoginBody):
 
     user = await Utilisateur.find_one(
@@ -52,8 +52,7 @@ async def login(body: LoginBody):
     if not user.is_actif:
         raise HTTPException(status_code=403, detail="Compte désactivé")
 
-    # ⚠️ IMPORTANT: dépend de ton modèle
-    if not user.verifier_mot_de_passe(body.mot_de_passe):
+    if not user.check_password(body.password):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
 
     token = create_token(user)
@@ -78,11 +77,12 @@ async def register(body: RegisterBody):
     user = Utilisateur(
         nom=body.nom,
         email=body.email.lower(),
-        mot_de_passe=body.mot_de_passe,
-        role=body.role
+        mot_de_passe=""
     )
 
-    user.hacher_mot_de_passe()
+    user.set_password(body.password)
+    user.role = body.role
+
     await user.insert()
 
     return {
@@ -91,8 +91,8 @@ async def register(body: RegisterBody):
     }
 
 
-# ───────── PROFILE ─────────
-async def me(user: Utilisateur):
+# ───────── PROFIL (GARDÉ COMME TU VEUX) ─────────
+async def mon_profil(user: Utilisateur):
     return {
         "success": True,
         "user": serialize_user(user)
