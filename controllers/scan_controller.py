@@ -6,10 +6,11 @@ import pathlib
 from typing import Optional
 from fastapi import HTTPException, UploadFile, Request
 from PIL import Image
-import pytesseract
+import easyocr                     # ← Remplacer pytesseract par easyocr
+import torch                       # ← Pour forcer l'utilisation du CPU
 from models.document import DocumentScan
 
-# ── Constantes ────────────────────────────────────────────────────────────────
+# ── Constantes (inchangées) ───────────────────────────────────────────────────
 BLACKLIST = {
     "REPUBLIQUE", "FRANCAISE", "FRANÇAISE", "SENEGAL", "SÉNÉGAL", "CARTE",
     "NATIONALE", "IDENTITE", "IDENTITÉ", "DOCUMENT", "PASSEPORT", "NOM",
@@ -26,6 +27,19 @@ LABELS_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# ── Initialisation globale du lecteur EasyOCR (chargé une seule fois) ─────────
+_ocr_reader = None
+
+def get_ocr_reader():
+    global _ocr_reader
+    if _ocr_reader is None:
+        # Forcer l'utilisation du CPU (gpu=False) car Render n'a pas de GPU
+        # Ajouter les langues nécessaires : français ('fr') et anglais ('en')
+        _ocr_reader = easyocr.Reader(['fr', 'en'], gpu=False)
+        print("✅ EasyOCR chargé avec succès")
+    return _ocr_reader
+
+# ── Fonctions utilitaires de post-traitement (inchangées) ─────────────────────
 def nettoyer(s: Optional[str]) -> Optional[str]:
     if not s:
         return None
@@ -177,18 +191,22 @@ def extraire_infos_piece(texte: str) -> dict:
                 infos["prenom"] = nettoyer(parts[1])
     return infos
 
+# ── Handler principal (adapté pour EasyOCR) ──────────────────────────────────
 async def scanner_image(request: Request, file: UploadFile):
     if not file:
         raise HTTPException(status_code=400, detail="Aucune image reçue.")
+
     upload_dir = os.getenv("UPLOAD_DIR", "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     unique = f"{int(time.time() * 1000)}_{random.randint(0, 999999999)}"
     ext = pathlib.Path(file.filename).suffix
     nom_fichier = f"scan_{unique}{ext}"
     chemin_fichier = os.path.join(upload_dir, nom_fichier)
+
     contents = await file.read()
     with open(chemin_fichier, "wb") as f:
         f.write(contents)
+
     document = DocumentScan(
         nom_fichier=nom_fichier,
         chemin_fichier=chemin_fichier,
@@ -196,13 +214,23 @@ async def scanner_image(request: Request, file: UploadFile):
         taille_fichier=len(contents),
     )
     await document.insert()
+
     try:
+        # Ouvrir l'image avec PIL
         image = Image.open(chemin_fichier)
-        texte = pytesseract.image_to_string(image, lang="fra+eng", config="--psm 6")
+        # Récupérer le lecteur EasyOCR (singleton)
+        reader = get_ocr_reader()
+        # Effectuer la reconnaissance de texte
+        # detail=0 -> retourne seulement le texte brut (pas les coordonnées)
+        # paragraph=False -> pas de regroupement en paragraphes
+        resultats = reader.readtext(image, detail=0, paragraph=False)
+        texte = " ".join(resultats)   # Fusionner les lignes détectées
+        print("📄 OCR RAW (EasyOCR):\n", texte)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur OCR : {str(e)}")
-    print("📄 OCR RAW:\n", texte)
+
     infos_extraites = extraire_infos_piece(texte)
+
     return {
         "success": True,
         "message": "Scan terminé.",
