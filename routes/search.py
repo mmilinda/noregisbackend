@@ -5,7 +5,6 @@ from middlewares.auth import get_current_user
 
 router = APIRouter(tags=["Recherche"], dependencies=[Depends(get_current_user)])
 
-
 @router.get("/")
 async def route_rechercher(
     query: Optional[str] = None,

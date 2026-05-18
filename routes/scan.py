@@ -6,7 +6,6 @@ router = APIRouter(tags=["Scan"], dependencies=[Depends(get_current_user)])
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
 
-
 @router.post("/")
 async def route_scan(request: Request, image: UploadFile = File(...)):
     if image.content_type not in ALLOWED_TYPES:

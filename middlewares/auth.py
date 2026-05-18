@@ -7,12 +7,10 @@ from models.utilisateur import Utilisateur
 
 bearer_scheme = HTTPBearer()
 
-
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> Utilisateur:
     token = credentials.credentials
-
     try:
         payload = jwt.decode(
             token,
@@ -32,9 +30,7 @@ async def get_current_user(
 
     if not utilisateur or not utilisateur.is_actif:
         raise HTTPException(status_code=401, detail="Compte introuvable ou désactivé.")
-
     return utilisateur
-
 
 def est_admin(utilisateur: Utilisateur = Depends(get_current_user)) -> Utilisateur:
     if utilisateur.role != "ADMIN":
