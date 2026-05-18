@@ -2,87 +2,93 @@ import os
 from datetime import datetime, timedelta
 from fastapi import HTTPException
 from jose import jwt
-from pydantic import BaseModel
+
 from models.utilisateur import Utilisateur
+from schemas.auth import LoginBody, RegisterBody
 
 
-# ── Schémas de requête ────────────────────────────────────────────────────────
+# ───────── TOKEN ─────────
+def create_token(user: Utilisateur):
+    hours = int(os.getenv("JWT_EXPIRES_IN", "8h").replace("h", ""))
 
-class LoginBody(BaseModel):
-    email: str
-    mot_de_passe: str
-
-
-class RegisterBody(BaseModel):
-    nom: str
-    email: str
-    mot_de_passe: str
-    role: str = "AGENT"
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _creer_token(user: Utilisateur) -> str:
-    expires_str = os.getenv("JWT_EXPIRES_IN", "8h")
-    hours = int(expires_str.replace("h", "")) if "h" in expires_str else 8
     payload = {
-        "id":   str(user.id),
+        "id": str(user.id),
         "role": user.role,
-        "exp":  datetime.utcnow() + timedelta(hours=hours),
+        "exp": datetime.utcnow() + timedelta(hours=hours),
     }
-    return jwt.encode(payload, os.getenv("JWT_SECRET", "changeme"), algorithm="HS256")
+
+    return jwt.encode(
+        payload,
+        os.getenv("JWT_SECRET", "changeme"),
+        algorithm="HS256"
+    )
 
 
-def _user_public(user: Utilisateur) -> dict:
-    return {"id": str(user.id), "nom": user.nom, "email": user.email, "role": user.role}
+# ───────── SERIALIZE USER ─────────
+def serialize_user(user: Utilisateur):
+    return {
+        "id": str(user.id),
+        "nom": user.nom,
+        "email": user.email,
+        "role": user.role,
+    }
 
 
-# ── Handlers ──────────────────────────────────────────────────────────────────
-
+# ───────── LOGIN ─────────
 async def login(body: LoginBody):
-    if not body.email or not body.mot_de_passe:
-        raise HTTPException(status_code=400, detail="Email et mot de passe requis.")
 
-    utilisateur = await Utilisateur.find_one(Utilisateur.email == body.email.lower())
-    if not utilisateur:
-        raise HTTPException(status_code=401, detail="Identifiants incorrects.")
-    if not utilisateur.is_actif:
-        raise HTTPException(status_code=403, detail="Compte désactivé.")
-    if not utilisateur.verifier_mot_de_passe(body.mot_de_passe):
-        raise HTTPException(status_code=401, detail="Identifiants incorrects.")
+    user = await Utilisateur.find_one(
+        Utilisateur.email == body.email.lower()
+    )
 
-    token = _creer_token(utilisateur)
+    if not user:
+        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
+
+    if not user.is_actif:
+        raise HTTPException(status_code=403, detail="Compte désactivé")
+
+    # 🔥 CORRECTION ICI
+    if not user.verifier_mot_de_passe(body.password):
+        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
+
+    token = create_token(user)
+
     return {
         "success": True,
-        "message": "Connexion réussie.",
         "token": token,
-        "utilisateur": _user_public(utilisateur),
+        "user": serialize_user(user)
     }
 
 
+# ───────── REGISTER ─────────
 async def register(body: RegisterBody):
-    if not body.nom or not body.email or not body.mot_de_passe:
-        raise HTTPException(status_code=400, detail="Nom, email et mot de passe requis.")
 
-    existe = await Utilisateur.find_one(Utilisateur.email == body.email.lower())
-    if existe:
-        raise HTTPException(status_code=409, detail="Email déjà utilisé.")
+    exist = await Utilisateur.find_one(
+        Utilisateur.email == body.email.lower()
+    )
 
-    utilisateur = Utilisateur(
+    if exist:
+        raise HTTPException(status_code=409, detail="Email déjà utilisé")
+
+    user = Utilisateur(
         nom=body.nom,
         email=body.email.lower(),
-        mot_de_passe=body.mot_de_passe,
-        role=body.role,
+        mot_de_passe=body.password,
+        role=body.role
     )
-    utilisateur.hacher_mot_de_passe()
-    await utilisateur.insert()
+
+    user.hacher_mot_de_passe()
+    await user.insert()
 
     return {
         "success": True,
-        "message": "Compte créé avec succès.",
-        "utilisateur": _user_public(utilisateur),
+        "user": serialize_user(user)
     }
 
 
-async def mon_profil(utilisateur: Utilisateur):
-    return {"success": True, "utilisateur": _user_public(utilisateur)}
+# ───────── PROFILE ─────────
+async def me(user: Utilisateur):
+    return {
+        "success": True,
+        "user": serialize_user(user)
+    }
