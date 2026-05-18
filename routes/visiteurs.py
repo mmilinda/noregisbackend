@@ -3,7 +3,7 @@ from controllers.visiteur_controller import (
     creer_visiteur, lister_visiteurs, get_visiteur, modifier_visiteur,
     VisiteurBody, VisiteurUpdate,
 )
-from middleware.auth import authentifier
+from middlewares.auth import authentifier
 from models.utilisateur import Utilisateur
 
 router = APIRouter(tags=["Visiteurs"], dependencies=[Depends(authentifier)])

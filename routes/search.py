@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends
 from controllers.search_controller import rechercher
-from middleware.auth import authentifier
+from middlewares.auth import authentifier
 
 router = APIRouter(tags=["Recherche"], dependencies=[Depends(authentifier)])
 

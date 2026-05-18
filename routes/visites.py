@@ -4,7 +4,7 @@ from controllers.visite_controller import (
     enregistrer_entree, enregistrer_sortie, lister_visites, visites_en_cours,
     EntreeBody,
 )
-from middleware.auth import authentifier
+from middlewares.auth import authentifier
 
 router = APIRouter(tags=["Visites"], dependencies=[Depends(authentifier)])
 
