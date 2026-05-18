@@ -9,7 +9,12 @@ from schemas.auth import LoginBody, RegisterBody
 
 # ───────── TOKEN ─────────
 def create_token(user: Utilisateur):
-    hours = int(os.getenv("JWT_EXPIRES_IN", "8h").replace("h", ""))
+    expires = os.getenv("JWT_EXPIRES_IN", "8h")
+
+    try:
+        hours = int(expires.replace("h", ""))
+    except:
+        hours = 8
 
     payload = {
         "id": str(user.id),
@@ -47,8 +52,8 @@ async def login(body: LoginBody):
     if not user.is_actif:
         raise HTTPException(status_code=403, detail="Compte désactivé")
 
-    # 🔥 CORRECTION ICI
-    if not user.verifier_mot_de_passe(body.password):
+    # ⚠️ IMPORTANT: dépend de ton modèle
+    if not user.verifier_mot_de_passe(body.mot_de_passe):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
 
     token = create_token(user)
@@ -73,7 +78,7 @@ async def register(body: RegisterBody):
     user = Utilisateur(
         nom=body.nom,
         email=body.email.lower(),
-        mot_de_passe=body.password,
+        mot_de_passe=body.mot_de_passe,
         role=body.role
     )
 
