@@ -1,6 +1,18 @@
-const Tesseract  = require('tesseract.js');
+// scanController.js
 const { Document } = require('../models');
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
 
+// ── Configuration Veryfi ─────────────────────────────────────────────
+const VERYFI_CLIENT_ID     = process.env.VERYFI_CLIENT_ID;
+const VERYFI_CLIENT_SECRET = process.env.VERYFI_CLIENT_SECRET;
+const VERYFI_USERNAME      = process.env.VERYFI_USERNAME;
+const VERYFI_API_KEY       = process.env.VERYFI_API_KEY;
+
+const VERYFI_API_URL = 'https://api.veryfi.com/api/v8/partner/documents';
+
+// ── Scanner avec Veryfi ─────────────────────────────────────────────
 const scannerImage = async (req, res) => {
   try {
     if (!req.file) {
@@ -9,6 +21,7 @@ const scannerImage = async (req, res) => {
 
     const cheminFichier = req.file.path;
 
+    // Sauvegarde en base (métadonnées)
     const document = await Document.create({
       nomFichier:    req.file.filename,
       cheminFichier,
@@ -16,35 +29,112 @@ const scannerImage = async (req, res) => {
       tailleFichier: req.file.size,
     });
 
-    const { data: { text } } = await Tesseract.recognize(
-      cheminFichier,
-      'fra+eng',
-      { logger: () => {}, tessedit_pageseg_mode: 6 }
-    );
+    // ── Appel à l'API Veryfi ───────────────────────────────────────
+    const form = new FormData();
+    form.append('file', fs.createReadStream(cheminFichier));
 
-    console.log('📄 OCR RAW:\n', text);
+    const response = await axios.post(VERYFI_API_URL, form, {
+      headers: {
+        ...form.getHeaders(),
+        'CLIENT-ID': VERYFI_CLIENT_ID,
+        'AUTHORIZATION': `apikey ${VERYFI_USERNAME}:${VERYFI_API_KEY}`,
+      },
+    });
 
-    const infosExtraites = extraireInfosPiece(text);
+    const data = response.data;
+    console.log('✅ Veryfi response:', data);
 
+    // Extraction des champs depuis la réponse Veryfi
+    const infosExtraites = extraireInfosDepuisVeryfi(data);
+
+    // Émission Socket.io si disponible
     const io = req.app.get('io');
     if (io) {
       io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
     }
 
+    // Suppression éventuelle du fichier temporaire (optionnel)
+    // fs.unlinkSync(cheminFichier);
+
     return res.json({
       success: true,
-      message: 'Scan terminé.',
+      message: 'Scan terminé via Veryfi.',
       document: { id: document._id, nomFichier: document.nomFichier },
       infosExtraites,
-      texteRaw: text,
+      texteRaw: data.ocr_text || '',
     });
 
   } catch (err) {
+    console.error('Veryfi error:', err.response?.data || err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
 
-/* ── Utilitaires ────────────────────────────────────────────────────────── */
+/* ── Adaptation des résultats Veryfi vers le format attendu ─────────── */
+const extraireInfosDepuisVeryfi = (data) => {
+  const ocrText = data.ocr_text || '';
+  const infos = {
+    nom: null,
+    prenom: null,
+    dateNaissance: null,
+    numeroPiece: null,
+    typePiece: 'CNI',
+  };
+
+  const upper = ocrText.toUpperCase();
+
+  // ── Type de pièce ────────────────────────────────────────────────
+  if (upper.includes('PASSEPORT')) {
+    infos.typePiece = 'PASSEPORT';
+  } else if (upper.includes('PERMIS DE CONDUIRE') || (upper.includes('PERMIS') && !upper.includes('PASSEPORT'))) {
+    infos.typePiece = 'PERMIS';
+  } else if (upper.includes("CARTE D'IDENTITE") || upper.includes('CARTE NATIONALE') ||
+             upper.includes('CEDEAO') || upper.includes('ECOWAS') || upper.includes('CNI')) {
+    infos.typePiece = 'CNI';
+  } else if (upper.includes('CARTE DE SEJOUR')) {
+    infos.typePiece = 'CARTE_SEJOUR';
+  } else if (upper.includes('CARTE CONSULAIRE') || upper.includes('CONSULAIRE')) {
+    infos.typePiece = 'CARTE_CONSULAIRE';
+  }
+
+  // ── Nom ──────────────────────────────────────────────────────────
+  let match = ocrText.match(/Nom\s*:?\s*([A-Z\s]+)(?:\n|Prénom|$)/i);
+  if (match) infos.nom = match[1].trim();
+
+  // ── Prénom ───────────────────────────────────────────────────────
+  match = ocrText.match(/Pr[ée]nom\s*:?\s*([A-Za-z\s]+)(?:\n|Date|$)/i);
+  if (match) infos.prenom = match[1].trim();
+
+  // ── Date de naissance ────────────────────────────────────────────
+  match = ocrText.match(/Date de Naissance\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  if (match) {
+    const [j, m, a] = match[1].split('/');
+    infos.dateNaissance = `${a}-${m}-${j}`;
+  } else {
+    infos.dateNaissance = extraireDate(ocrText); // fallback
+  }
+
+  // ── Numéro de pièce ──────────────────────────────────────────────
+  if (data.document_reference_number) {
+    infos.numeroPiece = data.document_reference_number;
+  } else {
+    match = ocrText.match(/No\s*:?\s*([A-Z0-9]+)/i);
+    if (match) infos.numeroPiece = match[1];
+    else {
+      const codeMatch = ocrText.match(/\b([A-Z0-9]{6,15})\b/);
+      if (codeMatch) infos.numeroPiece = codeMatch[1];
+    }
+  }
+
+  // Nettoyage final (suppression espaces superflus)
+  if (infos.nom) infos.nom = nettoyer(infos.nom);
+  if (infos.prenom) infos.prenom = nettoyer(infos.prenom);
+  if (infos.numeroPiece) infos.numeroPiece = infos.numeroPiece.replace(/\s/g, '');
+
+  return infos;
+};
+
+/* ── UTILITAIRES (conservés depuis votre code original) ───────────────── */
 
 const nettoyer = (str) => {
   if (!str) return null;
@@ -74,8 +164,6 @@ const extraireDate = (texte) => {
   return null;
 };
 
-/* ── Blacklist ──────────────────────────────────────────────────────────── */
-
 const BLACKLIST = new Set([
   'REPUBLIQUE','FRANCAISE','FRANÇAISE','SENEGAL','SÉNÉGAL','CARTE','NATIONALE',
   'IDENTITE','IDENTITÉ','DOCUMENT','PASSEPORT','NOM','SEXE','NATIONALITE',
@@ -95,164 +183,33 @@ const isValidNom = (s) => {
   return true;
 };
 
-/* ── Extraction label → valeur (gère label seul ET label+valeur sur 1 ligne) */
-
 const extraireChamp = (lignes, labelRegex, labelsAIgnorerRegex = null) => {
   for (let i = 0; i < lignes.length; i++) {
     const ligne = lignes[i];
     if (!labelRegex.test(ligne)) continue;
 
-    // ── Cas 1 : valeur sur la MÊME ligne après le label ──────────────────
-    // Ex: "Prénoms KHADIM" ou "Nom : FAYE"
     const apresLabel = ligne
-      .replace(labelRegex, '')       // supprime le label
-      .replace(/^\s*[:\-]?\s*/, '')  // supprime séparateur optionnel
+      .replace(labelRegex, '')
+      .replace(/^\s*[:\-]?\s*/, '')
       .trim();
 
     if (apresLabel.length >= 2 && !/^\d+$/.test(apresLabel)) {
-      // Extrait les mots valides
       const mots = apresLabel.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
       const valides = mots.filter(m => isValidNom(m));
       if (valides.length > 0) return valides.join(' ');
     }
 
-    // ── Cas 2 : valeur sur les lignes SUIVANTES ───────────────────────────
-    // Ex: "Prénoms\nKHADIM" ou "Nom\nFAYE"
     for (let j = 1; j <= 4; j++) {
       const l = (lignes[i + j] || '').trim();
       if (!l) continue;
-
-      // Ignore si c'est un autre label connu
       if (labelsAIgnorerRegex && labelsAIgnorerRegex.test(l)) continue;
-      // Ignore les lignes purement numériques ou trop courtes
       if (/^\d+$/.test(l) || l.length < 2) continue;
-
       const mots = l.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
       const valides = mots.filter(m => isValidNom(m));
       if (valides.length > 0) return valides.join(' ');
     }
   }
   return null;
-};
-
-/* ── Extraction principale ──────────────────────────────────────────────── */
-
-const extraireInfosPiece = (texte) => {
-  const infos = {
-    nom: null, prenom: null, numeroPiece: null,
-    typePiece: 'CNI', dateNaissance: null,
-  };
-
-  const texteClean = texte
-    .replace(/\|/g, 'I')
-    .replace(/[\u2018\u2019]/g, "'");
-
-  const lignes = texteClean.split('\n').map(l => l.trim()).filter(Boolean);
-  const upper  = texteClean.toUpperCase();
-
-  // ── Type de pièce ─────────────────────────────────────────────────────────
-  if (upper.includes('PASSEPORT'))                                     infos.typePiece = 'PASSEPORT';
-  else if (upper.includes('PERMIS DE CONDUIRE'))                       infos.typePiece = 'PERMIS';
-  else if (upper.includes("CARTE D'IDENTITE")
-        || upper.includes('CARTE NATIONALE')
-        || upper.includes('CEDEAO')
-        || upper.includes('ECOWAS')
-        || upper.includes('IDENTITY CARD')
-        || upper.includes('CNI'))                                       infos.typePiece = 'CNI';
-  else if (upper.includes('SEJOUR'))                                   infos.typePiece = 'CARTE_SEJOUR';
-
-  // ── Date de naissance ─────────────────────────────────────────────────────
-  for (let i = 0; i < lignes.length; i++) {
-    if (/date\s*de\s*naiss|date\s*of\s*birth/i.test(lignes[i])) {
-      const meme = lignes[i].match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
-      if (meme) { infos.dateNaissance = `${meme[3]}-${meme[2]}-${meme[1]}`; break; }
-      for (let j = 1; j <= 3; j++) {
-        const d = extraireDate(lignes[i + j] || '');
-        if (d) { infos.dateNaissance = d; break; }
-      }
-      if (infos.dateNaissance) break;
-    }
-  }
-  if (!infos.dateNaissance) infos.dateNaissance = extraireDate(texteClean);
-
-  // Labels à ignorer quand on cherche la valeur suivante
-  const LABELS_REGEX = /^(Pr[ée]noms?|Nom|Date|Sexe|Taille|Lieu|N[°º]|Carte|Birth|Surname|Given|Forename)\b/i;
-
-  // ── PRÉNOM ────────────────────────────────────────────────────────────────
-  const prenomBrut = extraireChamp(
-    lignes,
-    /Pr[ée]noms?\s*[:\-]?|Given\s*names?\s*[:\-]?|Forenames?\s*[:\-]?/i,
-    LABELS_REGEX
-  );
-  if (prenomBrut) infos.prenom = nettoyer(prenomBrut);
-
-  // ── NOM ───────────────────────────────────────────────────────────────────
-  const nomBrut = extraireChamp(
-    lignes,
-    /^Nom\s*[:\-]?$|^Nom\s+[A-Z]|Surname\s*[:\-]?|Last\s*name\s*[:\-]?/i,
-    LABELS_REGEX
-  );
-  if (nomBrut) infos.nom = nettoyer(nomBrut);
-
-  // ── NOM fallback : mot majuscule après le prénom dans le texte brut ───────
-  if (!infos.nom && infos.prenom) {
-    const prenomUpper = infos.prenom.toUpperCase();
-    const pos = upper.indexOf(prenomUpper);
-    if (pos !== -1) {
-      const apres = texteClean.slice(pos + infos.prenom.length);
-      const candidats = apres.match(/\b[A-ZÀ-Ÿ]{2,}\b/g) || [];
-      const val = candidats.find(c => isValidNom(c) && c !== prenomUpper);
-      if (val) infos.nom = nettoyer(val);
-    }
-  }
-
-  // ── Numéro de pièce ───────────────────────────────────────────────────────
-  for (let i = 0; i < lignes.length; i++) {
-    if (/N[°º\.]\s*de\s*la\s*carte|carte\s*d.identit/i.test(lignes[i])) {
-      // Même ligne
-      const meme = lignes[i].match(/[\d][\d\s]{5,}/);
-      if (meme) { infos.numeroPiece = meme[0].replace(/\s+/g, ''); break; }
-      // Lignes suivantes
-      for (let j = 1; j <= 4; j++) {
-        const m = (lignes[i + j] || '').match(/[\d][\d\s]{5,}/);
-        if (m) {
-          const code = m[0].replace(/\s+/g, '');
-          if (code.length >= 6) { infos.numeroPiece = code; break; }
-        }
-      }
-      if (infos.numeroPiece) break;
-    }
-  }
-
-  if (!infos.numeroPiece) {
-    for (let i = 0; i < lignes.length; i++) {
-      if (/N[°º]\s*DU\s*DOCUMENT|Document\s*No/i.test(lignes[i])) {
-        for (let j = 0; j <= 4; j++) {
-          const m = (lignes[i + j] || '').match(/\b([A-Z0-9]{6,15})\b/g);
-          const code = (m || []).find(c => /[A-Z]/.test(c) && /[0-9]/.test(c));
-          if (code) { infos.numeroPiece = code; break; }
-        }
-        if (infos.numeroPiece) break;
-      }
-    }
-  }
-
-  if (!infos.numeroPiece) {
-    const m = texteClean.match(/\b([A-Z][A-Z0-9]{5,14})\b/g);
-    if (m) infos.numeroPiece = m.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c)) || null;
-  }
-
-  // ── MRZ fallback ──────────────────────────────────────────────────────────
-  if (!infos.nom || !infos.prenom) {
-    const mrzLines = lignes.filter(l => /^[A-Z<]{20,}/.test(l));
-    if (mrzLines.length > 0) {
-      const parts = mrzLines[0].replace(/</g, ' ').split(/\s+/).filter(Boolean);
-      if (!infos.nom    && isValidNom(parts[0])) infos.nom    = nettoyer(parts[0]);
-      if (!infos.prenom && isValidNom(parts[1])) infos.prenom = nettoyer(parts[1]);
-    }
-  }
-
-  return infos;
 };
 
 module.exports = { scannerImage };
