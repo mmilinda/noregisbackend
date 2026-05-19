@@ -17,7 +17,7 @@ class VisiteurBody(BaseModel):
 
     class Config:
         populate_by_name = True
-        extra = "ignore"  # ignore les champs supplémentaires (personneVisitee, service, etc.)
+        extra = "ignore"
 
 class VisiteurUpdate(BaseModel):
     nom: Optional[str] = None
@@ -43,6 +43,7 @@ async def creer_visiteur(body: VisiteurBody):
             "success": True,
             "message": "Visiteur déjà enregistré.",
             "visiteur": _visiteur_dict(existe),
+            "id": str(existe.id),          # ← ajout pour le front
             "est_nouveau": False,
         }
 
@@ -65,6 +66,7 @@ async def creer_visiteur(body: VisiteurBody):
         "success": True,
         "message": "Visiteur créé.",
         "visiteur": _visiteur_dict(visiteur),
+        "id": str(visiteur.id),            # ← ajout pour le front
         "est_nouveau": True,
     }
 
