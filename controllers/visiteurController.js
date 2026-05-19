@@ -2,13 +2,38 @@ const { Visiteur, Visite, Document } = require('../models');
 
 const creerVisiteur = async (req, res) => {
   try {
-    const { nom, prenom, dateNaissance, numeroPiece, typePiece } = req.body;
+    const {
+      nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
+      numeroPiece, typePiece, dateDelivrance, dateExpiration,
+      centreEnregistrement, adresseDomicile
+    } = req.body;
+
+    // Vérifier unicité du numéro de pièce
     const existeDeja = await Visiteur.findOne({ numeroPiece });
     if (existeDeja) {
-      return res.status(200).json({ success: true, message: 'Visiteur déjà enregistré.', visiteur: existeDeja, estNouveau: false });
+      return res.status(200).json({
+        success: true,
+        message: 'Visiteur déjà enregistré.',
+        visiteur: existeDeja,
+        estNouveau: false,
+        id: existeDeja._id
+      });
     }
-    const visiteur = await Visiteur.create({ nom, prenom, dateNaissance, numeroPiece, typePiece });
-    res.status(201).json({ success: true, message: 'Visiteur créé.', visiteur, estNouveau: true });
+
+    // Création du visiteur avec tous les champs
+    const visiteur = await Visiteur.create({
+      nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
+      numeroPiece, typePiece, dateDelivrance, dateExpiration,
+      centreEnregistrement, adresseDomicile
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Visiteur créé.',
+      visiteur,
+      id: visiteur._id,
+      estNouveau: true
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -45,7 +70,11 @@ const getVisiteur = async (req, res) => {
 
 const modifierVisiteur = async (req, res) => {
   try {
-    const visiteur = await Visiteur.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const visiteur = await Visiteur.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
     if (!visiteur) return res.status(404).json({ success: false, message: 'Visiteur introuvable.' });
     res.json({ success: true, message: 'Visiteur mis à jour.', visiteur });
   } catch (err) {

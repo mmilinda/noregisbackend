@@ -1,4 +1,3 @@
-// scanController.js
 const { Document } = require('../models');
 const axios = require('axios');
 const FormData = require('form-data');
@@ -79,63 +78,101 @@ const extraireInfosDepuisVeryfi = (data) => {
     dateNaissance: null,
     numeroPiece: null,
     typePiece: 'CNI',
+    sexe: null,
+    taille: null,
+    lieuNaissance: null,
+    dateDelivrance: null,
+    dateExpiration: null,
+    centreEnregistrement: null,
+    adresseDomicile: null,
   };
 
-  const upper = ocrText.toUpperCase();
-
-  // ── Type de pièce ────────────────────────────────────────────────
-  if (upper.includes('PASSEPORT')) {
+  // ── Type de pièce (détection spécifique CEDEAO) ─────────────────
+  if (ocrText.toUpperCase().includes('CARTE D\'IDENTITE CEDEAO') ||
+      ocrText.toUpperCase().includes('ECOWAS IDENTITY CARD')) {
+    infos.typePiece = 'CARTE_IDENTITE_CEDEAO';
+  } else if (ocrText.toUpperCase().includes('PASSEPORT')) {
     infos.typePiece = 'PASSEPORT';
-  } else if (upper.includes('PERMIS DE CONDUIRE') || (upper.includes('PERMIS') && !upper.includes('PASSEPORT'))) {
+  } else if (ocrText.toUpperCase().includes('PERMIS DE CONDUIRE')) {
     infos.typePiece = 'PERMIS';
-  } else if (upper.includes("CARTE D'IDENTITE") || upper.includes('CARTE NATIONALE') ||
-             upper.includes('CEDEAO') || upper.includes('ECOWAS') || upper.includes('CNI')) {
-    infos.typePiece = 'CNI';
-  } else if (upper.includes('CARTE DE SEJOUR')) {
+  } else if (ocrText.toUpperCase().includes('CARTE DE SEJOUR')) {
     infos.typePiece = 'CARTE_SEJOUR';
-  } else if (upper.includes('CARTE CONSULAIRE') || upper.includes('CONSULAIRE')) {
+  } else if (ocrText.toUpperCase().includes('CARTE CONSULAIRE')) {
     infos.typePiece = 'CARTE_CONSULAIRE';
+  } else if (ocrText.toUpperCase().includes('CARTE NATIONALE') ||
+             ocrText.toUpperCase().includes('CNI')) {
+    infos.typePiece = 'CNI';
   }
 
+  // ── Numéro de pièce ──────────────────────────────────────────────
+  let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*:?\s*([A-Z0-9]+)/i);
+  if (!match) match = ocrText.match(/N[°º]\s*:?\s*([A-Z0-9]{8,})/i);
+  if (!match && data.document_reference_number) match = [null, data.document_reference_number];
+  if (match) infos.numeroPiece = match[1].trim();
+
   // ── Nom ──────────────────────────────────────────────────────────
-  let match = ocrText.match(/Nom\s*:?\s*([A-Z\s]+)(?:\n|Prénom|$)/i);
-  if (match) infos.nom = match[1].trim();
+  match = ocrText.match(/Nom\s*:?\s*([A-Z\s]+)(?:\n|Prénom|$)/i);
+  if (match) infos.nom = nettoyer(match[1].trim());
 
   // ── Prénom ───────────────────────────────────────────────────────
   match = ocrText.match(/Pr[ée]nom\s*:?\s*([A-Za-z\s]+)(?:\n|Date|$)/i);
-  if (match) infos.prenom = match[1].trim();
+  if (match) infos.prenom = nettoyer(match[1].trim());
 
   // ── Date de naissance ────────────────────────────────────────────
-  match = ocrText.match(/Date de Naissance\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  match = ocrText.match(/Date de naissance\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
     infos.dateNaissance = `${a}-${m}-${j}`;
   } else {
-    infos.dateNaissance = extraireDate(ocrText); // fallback
+    infos.dateNaissance = extraireDate(ocrText);
   }
 
-  // ── Numéro de pièce ──────────────────────────────────────────────
-  if (data.document_reference_number) {
-    infos.numeroPiece = data.document_reference_number;
-  } else {
-    match = ocrText.match(/No\s*:?\s*([A-Z0-9]+)/i);
-    if (match) infos.numeroPiece = match[1];
-    else {
-      const codeMatch = ocrText.match(/\b([A-Z0-9]{6,15})\b/);
-      if (codeMatch) infos.numeroPiece = codeMatch[1];
-    }
+  // ── Sexe ─────────────────────────────────────────────────────────
+  match = ocrText.match(/Sexe\s*:?\s*([MF])/i);
+  if (match) infos.sexe = match[1].toUpperCase();
+
+  // ── Taille (en cm) ───────────────────────────────────────────────
+  match = ocrText.match(/Taille\s*:?\s*(\d{2,3})\s*cm/i);
+  if (match) infos.taille = parseInt(match[1], 10);
+
+  // ── Lieu de naissance ────────────────────────────────────────────
+  match = ocrText.match(/Lieu de naissance\s*:?\s*([A-Z\s]+)(?:\n|$)/i);
+  if (match) infos.lieuNaissance = nettoyer(match[1].trim());
+
+  // ── Date de délivrance ───────────────────────────────────────────
+  match = ocrText.match(/Date de délivrance\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  if (match) {
+    const [j, m, a] = match[1].split('/');
+    infos.dateDelivrance = `${a}-${m}-${j}`;
   }
 
-  // Nettoyage final (suppression espaces superflus)
+  // ── Date d'expiration ────────────────────────────────────────────
+  match = ocrText.match(/Date d['']expiration\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  if (match) {
+    const [j, m, a] = match[1].split('/');
+    infos.dateExpiration = `${a}-${m}-${j}`;
+  }
+
+  // ── Centre d'enregistrement ──────────────────────────────────────
+  match = ocrText.match(/Centre d['']enregistrement\s*:?\s*([A-Z\s\/]+)(?:\n|$)/i);
+  if (match) infos.centreEnregistrement = nettoyer(match[1].trim());
+
+  // ── Adresse du domicile ──────────────────────────────────────────
+  match = ocrText.match(/Adresse du domicile\s*:?\s*([A-Z\s]+)(?:\n|$)/i);
+  if (match) infos.adresseDomicile = nettoyer(match[1].trim());
+
+  // Nettoyage final
   if (infos.nom) infos.nom = nettoyer(infos.nom);
   if (infos.prenom) infos.prenom = nettoyer(infos.prenom);
+  if (infos.lieuNaissance) infos.lieuNaissance = nettoyer(infos.lieuNaissance);
+  if (infos.centreEnregistrement) infos.centreEnregistrement = nettoyer(infos.centreEnregistrement);
+  if (infos.adresseDomicile) infos.adresseDomicile = nettoyer(infos.adresseDomicile);
   if (infos.numeroPiece) infos.numeroPiece = infos.numeroPiece.replace(/\s/g, '');
 
   return infos;
 };
 
-/* ── UTILITAIRES (conservés depuis votre code original) ───────────────── */
-
+/* ── UTILITAIRES (conservés) ─────────────────────────────────────────── */
 const nettoyer = (str) => {
   if (!str) return null;
   return str
@@ -184,21 +221,19 @@ const isValidNom = (s) => {
 };
 
 const extraireChamp = (lignes, labelRegex, labelsAIgnorerRegex = null) => {
+  // ... (fonction inchangée, conservée pour compatibilité)
   for (let i = 0; i < lignes.length; i++) {
     const ligne = lignes[i];
     if (!labelRegex.test(ligne)) continue;
-
     const apresLabel = ligne
       .replace(labelRegex, '')
       .replace(/^\s*[:\-]?\s*/, '')
       .trim();
-
     if (apresLabel.length >= 2 && !/^\d+$/.test(apresLabel)) {
       const mots = apresLabel.match(/\b[A-ZÀ-Ÿa-zà-ÿ]{2,}\b/g) || [];
       const valides = mots.filter(m => isValidNom(m));
       if (valides.length > 0) return valides.join(' ');
     }
-
     for (let j = 1; j <= 4; j++) {
       const l = (lignes[i + j] || '').trim();
       if (!l) continue;
