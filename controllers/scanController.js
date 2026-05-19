@@ -87,91 +87,87 @@ const extraireInfosDepuisVeryfi = (data) => {
     adresseDomicile: null,
   };
 
-  // ── Type de pièce (détection spécifique CEDEAO) ─────────────────
+  // ── Type de pièce (détection CEDEAO) ─────────────────────────────
   if (ocrText.toUpperCase().includes('CARTE D\'IDENTITE CEDEAO') ||
       ocrText.toUpperCase().includes('ECOWAS IDENTITY CARD')) {
     infos.typePiece = 'CARTE_IDENTITE_CEDEAO';
   } else if (ocrText.toUpperCase().includes('PASSEPORT')) {
     infos.typePiece = 'PASSEPORT';
-  } else if (ocrText.toUpperCase().includes('PERMIS DE CONDUIRE')) {
+  } else if (ocrText.toUpperCase().includes('PERMIS')) {
     infos.typePiece = 'PERMIS';
   } else if (ocrText.toUpperCase().includes('CARTE DE SEJOUR')) {
     infos.typePiece = 'CARTE_SEJOUR';
   } else if (ocrText.toUpperCase().includes('CARTE CONSULAIRE')) {
     infos.typePiece = 'CARTE_CONSULAIRE';
-  } else if (ocrText.toUpperCase().includes('CARTE NATIONALE') ||
-             ocrText.toUpperCase().includes('CNI')) {
+  } else if (ocrText.toUpperCase().includes('CNI')) {
     infos.typePiece = 'CNI';
   }
 
-  // ── Numéro de pièce ──────────────────────────────────────────────
-  let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*:?\s*([A-Z0-9]+)/i);
-  if (!match) match = ocrText.match(/N[°º]\s*:?\s*([A-Z0-9]{8,})/i);
-  if (!match && data.document_reference_number) match = [null, data.document_reference_number];
-  if (match) infos.numeroPiece = match[1].trim();
+  // ── Numéro de pièce (cherche un long nombre sur plusieurs lignes) ──
+  let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*\n\s*([\d\s]+)/i);
+  if (match) {
+    // nettoie les espaces
+    infos.numeroPiece = match[1].replace(/\s/g, '');
+  } else {
+    // fallback : tout nombre de plus de 15 chiffres
+    match = ocrText.match(/\b(\d{15,})\b/);
+    if (match) infos.numeroPiece = match[1];
+  }
 
-  // ── Nom ──────────────────────────────────────────────────────────
-  match = ocrText.match(/Nom\s*:?\s*([A-Z\s]+)(?:\n|Prénom|$)/i);
-  if (match) infos.nom = nettoyer(match[1].trim());
+  // ── Prénom (ligne après "Prénom") ─────────────────────────────────
+  match = ocrText.match(/Pr[ée]nom\s*\n\s*([A-Za-z\s]+)(?:\n|$)/i);
+  if (match) infos.prenom = match[1].trim();
 
-  // ── Prénom ───────────────────────────────────────────────────────
-  match = ocrText.match(/Pr[ée]nom\s*:?\s*([A-Za-z\s]+)(?:\n|Date|$)/i);
-  if (match) infos.prenom = nettoyer(match[1].trim());
+  // ── Nom (ligne après "Nom") ───────────────────────────────────────
+  match = ocrText.match(/Nom\s*\n\s*([A-Z\s]+)(?:\n|$)/i);
+  if (match) infos.nom = match[1].trim();
 
-  // ── Date de naissance ────────────────────────────────────────────
-  match = ocrText.match(/Date de naissance\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  // ── Date de naissance, sexe, taille (ligne avec trois valeurs séparées par tabulation) ──
+  match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+([MF])\s+(\d{2,3})\s*cm/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
     infos.dateNaissance = `${a}-${m}-${j}`;
+    infos.sexe = match[2];
+    infos.taille = parseInt(match[3], 10);
   } else {
-    infos.dateNaissance = extraireDate(ocrText);
+    // fallback date seule
+    match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})/);
+    if (match) {
+      const [j, m, a] = match[1].split('/');
+      infos.dateNaissance = `${a}-${m}-${j}`;
+    }
   }
 
-  // ── Sexe ─────────────────────────────────────────────────────────
-  match = ocrText.match(/Sexe\s*:?\s*([MF])/i);
-  if (match) infos.sexe = match[1].toUpperCase();
+  // ── Lieu de naissance (ligne après "Lieu de naissance" ou "Lito de naissance") ──
+  match = ocrText.match(/Lieu\s*de\s*naissance|Lito\s*de\s*naissance\s*\n\s*([A-Z\s]+)(?:\n|$)/i);
+  if (match) infos.lieuNaissance = match[1].trim();
 
-  // ── Taille (en cm) ───────────────────────────────────────────────
-  match = ocrText.match(/Taille\s*:?\s*(\d{2,3})\s*cm/i);
-  if (match) infos.taille = parseInt(match[1], 10);
-
-  // ── Lieu de naissance ────────────────────────────────────────────
-  match = ocrText.match(/Lieu de naissance\s*:?\s*([A-Z\s]+)(?:\n|$)/i);
-  if (match) infos.lieuNaissance = nettoyer(match[1].trim());
-
-  // ── Date de délivrance ───────────────────────────────────────────
-  match = ocrText.match(/Date de délivrance\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
+  // ── Date de délivrance et expiration (deux dates sur la même ligne) ──
+  match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
   if (match) {
-    const [j, m, a] = match[1].split('/');
-    infos.dateDelivrance = `${a}-${m}-${j}`;
+    const [j1, m1, a1] = match[1].split('/');
+    const [j2, m2, a2] = match[2].split('/');
+    infos.dateDelivrance = `${a1}-${m1}-${j1}`;
+    infos.dateExpiration = `${a2}-${m2}-${j2}`;
   }
 
-  // ── Date d'expiration ────────────────────────────────────────────
-  match = ocrText.match(/Date d['']expiration\s*:?\s*(\d{2}\/\d{2}\/\d{4})/i);
-  if (match) {
-    const [j, m, a] = match[1].split('/');
-    infos.dateExpiration = `${a}-${m}-${j}`;
-  }
+  // ── Centre d'enregistrement (ligne après "Centre d'enregistrement" ou "Centre fenregistrement") ──
+  match = ocrText.match(/Centre\s*[fd]?enregistrement\s*\n\s*([A-Z\s\/]+)(?:\n|$)/i);
+  if (match) infos.centreEnregistrement = match[1].trim();
 
-  // ── Centre d'enregistrement ──────────────────────────────────────
-  match = ocrText.match(/Centre d['']enregistrement\s*:?\s*([A-Z\s\/]+)(?:\n|$)/i);
-  if (match) infos.centreEnregistrement = nettoyer(match[1].trim());
+  // ── Adresse (ligne après "Adresse du domicile" ou "Adresse di domible") ──
+  match = ocrText.match(/Adresse\s*du\s*domicile|Adresse\s*di\s*domible\s*\n\s*([A-Z\s]+)(?:\n|$)/i);
+  if (match) infos.adresseDomicile = match[1].trim();
 
-  // ── Adresse du domicile ──────────────────────────────────────────
-  match = ocrText.match(/Adresse du domicile\s*:?\s*([A-Z\s]+)(?:\n|$)/i);
-  if (match) infos.adresseDomicile = nettoyer(match[1].trim());
-
-  // Nettoyage final
-  if (infos.nom) infos.nom = nettoyer(infos.nom);
+  // ── Nettoyage final ────────────────────────────────────────────────
   if (infos.prenom) infos.prenom = nettoyer(infos.prenom);
+  if (infos.nom) infos.nom = nettoyer(infos.nom);
   if (infos.lieuNaissance) infos.lieuNaissance = nettoyer(infos.lieuNaissance);
   if (infos.centreEnregistrement) infos.centreEnregistrement = nettoyer(infos.centreEnregistrement);
   if (infos.adresseDomicile) infos.adresseDomicile = nettoyer(infos.adresseDomicile);
-  if (infos.numeroPiece) infos.numeroPiece = infos.numeroPiece.replace(/\s/g, '');
 
   return infos;
 };
-
 /* ── UTILITAIRES (conservés) ─────────────────────────────────────────── */
 const nettoyer = (str) => {
   if (!str) return null;
