@@ -1,7 +1,8 @@
+# controllers/visiteur_controller.py
 from typing import Optional
 from datetime import datetime
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from bson import ObjectId
 from models.visiteur import Visiteur
 from models.visite import Visite
@@ -10,16 +11,24 @@ from models.document import DocumentScan
 class VisiteurBody(BaseModel):
     nom: str
     prenom: str
-    date_naissance: Optional[str] = None
-    numero_piece: str
-    type_piece: str = "CNI"
+    date_naissance: Optional[str] = Field(None, alias="dateNaissance")
+    numero_piece: str = Field(..., alias="numeroPiece")
+    type_piece: str = Field("CNI", alias="typePiece")
+
+    class Config:
+        populate_by_name = True
+        extra = "ignore"  # ignore les champs supplémentaires (personneVisitee, service, etc.)
 
 class VisiteurUpdate(BaseModel):
     nom: Optional[str] = None
     prenom: Optional[str] = None
-    date_naissance: Optional[str] = None
-    numero_piece: Optional[str] = None
-    type_piece: Optional[str] = None
+    date_naissance: Optional[str] = Field(None, alias="dateNaissance")
+    numero_piece: Optional[str] = Field(None, alias="numeroPiece")
+    type_piece: Optional[str] = Field(None, alias="typePiece")
+
+    class Config:
+        populate_by_name = True
+        extra = "ignore"
 
 def _visiteur_dict(v: Visiteur) -> dict:
     d = v.dict()
@@ -30,13 +39,20 @@ def _visiteur_dict(v: Visiteur) -> dict:
 async def creer_visiteur(body: VisiteurBody):
     existe = await Visiteur.find_one(Visiteur.numero_piece == body.numero_piece)
     if existe:
-        return {"success": True, "message": "Visiteur déjà enregistré.", "visiteur": _visiteur_dict(existe), "est_nouveau": False}
+        return {
+            "success": True,
+            "message": "Visiteur déjà enregistré.",
+            "visiteur": _visiteur_dict(existe),
+            "est_nouveau": False,
+        }
+
     date_naissance = None
     if body.date_naissance:
         try:
             date_naissance = datetime.fromisoformat(body.date_naissance)
         except ValueError:
             pass
+
     visiteur = Visiteur(
         nom=body.nom,
         prenom=body.prenom,
@@ -45,13 +61,24 @@ async def creer_visiteur(body: VisiteurBody):
         type_piece=body.type_piece,
     )
     await visiteur.insert()
-    return {"success": True, "message": "Visiteur créé.", "visiteur": _visiteur_dict(visiteur), "est_nouveau": True}
+    return {
+        "success": True,
+        "message": "Visiteur créé.",
+        "visiteur": _visiteur_dict(visiteur),
+        "est_nouveau": True,
+    }
 
 async def lister_visiteurs(page: int = 1, limit: int = 20):
     skip = (page - 1) * limit
     total = await Visiteur.count()
     visiteurs = await Visiteur.find_all().sort(-Visiteur.created_at).skip(skip).limit(limit).to_list()
-    return {"success": True, "total": total, "page": page, "pages": -(-total // limit), "visiteurs": [_visiteur_dict(v) for v in visiteurs]}
+    return {
+        "success": True,
+        "total": total,
+        "page": page,
+        "pages": -(-total // limit),
+        "visiteurs": [_visiteur_dict(v) for v in visiteurs],
+    }
 
 async def get_visiteur(visiteur_id: str):
     try:
@@ -76,7 +103,7 @@ async def modifier_visiteur(visiteur_id: str, body: VisiteurUpdate):
     visiteur = await Visiteur.get(oid)
     if not visiteur:
         raise HTTPException(status_code=404, detail="Visiteur introuvable.")
-    update_data = {k: v for k, v in body.dict().items() if v is not None}
+    update_data = {k: v for k, v in body.dict(by_alias=True).items() if v is not None}
     for key, val in update_data.items():
         setattr(visiteur, key, val)
     visiteur.updated_at = datetime.utcnow()
