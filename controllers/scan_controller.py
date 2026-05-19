@@ -2,11 +2,11 @@ import os
 import pathlib
 import random
 import time
+import re
 from fastapi import HTTPException, UploadFile, Request
 from veryfi import Client
 from models.document import DocumentScan
 
-# Initialisation du client Veryfi (un seul objet pour toute l'application)
 veryfi_client = None
 
 def get_veryfi_client():
@@ -16,20 +16,57 @@ def get_veryfi_client():
         client_secret = os.getenv("VERYFI_CLIENT_SECRET")
         username = os.getenv("VERYFI_USERNAME")
         api_key = os.getenv("VERYFI_API_KEY")
-
         if not all([client_id, client_secret, username, api_key]):
-            raise ValueError("Variables Veryfi manquantes dans l'environnement")
-
+            raise ValueError("Variables Veryfi manquantes")
         veryfi_client = Client(client_id, client_secret, username, api_key)
         print("✅ Client Veryfi initialisé")
     return veryfi_client
 
+def extraire_infos_depuis_veryfi(response: dict) -> dict:
+    ocr_text = response.get('ocr_text', '')
+    infos = {
+        "nom": None,
+        "prenom": None,
+        "date_naissance": None,
+        "numero_piece": None,
+        "type_piece": "CNI",
+    }
+
+    # Nom
+    m = re.search(r'Nom\s*:?\s*([A-Z\s]+?)(?:\n|Prénom|$)', ocr_text, re.IGNORECASE)
+    if m:
+        infos["nom"] = m.group(1).strip()
+    # Prénom
+    m = re.search(r'Pr[ée]nom\s*:?\s*([A-Za-z\s]+?)(?:\n|Date|$)', ocr_text, re.IGNORECASE)
+    if m:
+        infos["prenom"] = m.group(1).strip()
+    # Date de naissance
+    m = re.search(r'Date de Naissance\s*:?\s*(\d{2}/\d{2}/\d{4})', ocr_text)
+    if m:
+        j, mo, a = m.group(1).split('/')
+        infos["date_naissance"] = f"{a}-{mo}-{j}"
+    # Numéro de pièce
+    num = response.get('document_reference_number')
+    if not num:
+        m = re.search(r'No\s*:?\s*([A-Z0-9]+)', ocr_text)
+        if m:
+            num = m.group(1)
+    infos["numero_piece"] = num
+    # Type de pièce
+    if "PASSEPORT" in ocr_text.upper():
+        infos["type_piece"] = "PASSEPORT"
+    elif "PERMIS" in ocr_text.upper():
+        infos["type_piece"] = "PERMIS"
+    elif "CARTE DE SEJOUR" in ocr_text.upper():
+        infos["type_piece"] = "CARTE_SEJOUR"
+    else:
+        infos["type_piece"] = "CNI"
+    return infos
 
 async def scanner_image(request: Request, file: UploadFile):
     if not file:
         raise HTTPException(status_code=400, detail="Aucune image reçue.")
 
-    # Sauvegarde locale
     upload_dir = os.getenv("UPLOAD_DIR", "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     unique = f"{int(time.time() * 1000)}_{random.randint(0, 999999999)}"
@@ -41,7 +78,6 @@ async def scanner_image(request: Request, file: UploadFile):
     with open(chemin_fichier, "wb") as f:
         f.write(contents)
 
-    # Enregistrement en base
     document = DocumentScan(
         nom_fichier=nom_fichier,
         chemin_fichier=chemin_fichier,
@@ -53,27 +89,18 @@ async def scanner_image(request: Request, file: UploadFile):
     try:
         client = get_veryfi_client()
         response = client.process_document(chemin_fichier, categories=[])
-        print("✅ Veryfi OK", response)
+        print("✅ Extraction Veryfi réussie")
+        infos_extraites = extraire_infos_depuis_veryfi(response)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur Veryfi : {str(e)}")
-
-    # Adapter les champs selon vos besoins
-    infos_extraites = {
-        "nom": response.get('vendor', {}).get('name'),
-        "prenom": None,
-        "numero_piece": response.get('invoice_number') or response.get('document_number'),
-        "type_piece": "CNI",
-        "date_naissance": None,
-        "adresse": response.get('vendor', {}).get('address'),
-        "date_document": response.get('date'),
-        "montant_total": response.get('total'),
-        "categorie": response.get('category'),
-    }
+    finally:
+        if os.path.exists(chemin_fichier):
+            os.remove(chemin_fichier)
 
     return {
         "success": True,
-        "message": "Scan via Veryfi réussi",
+        "message": "Scan terminé avec succès via Veryfi.",
         "document": {"id": str(document.id), "nom_fichier": nom_fichier},
-        "infos_extraites": infos_extraites,
-        "texte_raw": response.get('ocr_text'),
+        "infosExtraites": infos_extraites,          # ← camelCase pour le front
+        "texte_raw": response.get('ocr_text', ''),
     }
