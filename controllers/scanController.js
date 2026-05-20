@@ -53,6 +53,8 @@ const scannerImage = async (req, res) => {
 
 const extraireInfosDepuisVeryfi = (data) => {
   const ocrText = data.ocr_text || '';
+  const lignes = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
   const infos = {
     nom: null, prenom: null, dateNaissance: null, numeroPiece: null,
     typePiece: 'CNI', sexe: null, taille: null, lieuNaissance: null,
@@ -60,29 +62,40 @@ const extraireInfosDepuisVeryfi = (data) => {
     adresseDomicile: null,
   };
 
-  // PRÉNOM (copie de la regex Python)
-  let match = ocrText.match(/Pr[ée]nom\s*:?\s*([A-Za-z\s]+?)(?:\n|Date|$)/i);
-  if (match) infos.prenom = match[1].trim();
+  // Fonction pour extraire une valeur après un label
+  const extraireValeurApresLabel = (label, lignes) => {
+    const labelLower = label.toLowerCase();
+    for (let i = 0; i < lignes.length; i++) {
+      const ligne = lignes[i];
+      if (ligne.toLowerCase().startsWith(labelLower)) {
+        // Vérifier si la valeur est sur la même ligne après un ':'
+        const partie = ligne.substring(label.length);
+        let valeur = partie.replace(/^[\s:]+/, '').trim();
+        if (valeur) return valeur;
+        // Sinon, prendre la ligne suivante
+        if (i + 1 < lignes.length) return lignes[i + 1].trim();
+      }
+    }
+    return null;
+  };
 
-  // NOM
-  match = ocrText.match(/Nom\s*:?\s*([A-Za-z\s]+?)(?:\n|Prénom|$)/i);
-  if (match) infos.nom = match[1].trim();
+  // Extraction des champs texte avec gestion des variantes
+  infos.prenom = extraireValeurApresLabel('Prénoms', lignes) ||
+                 extraireValeurApresLabel('Prénom', lignes);
+  infos.nom = extraireValeurApresLabel('Nom', lignes);
+  infos.lieuNaissance = extraireValeurApresLabel('Lieu de naissance', lignes) ||
+                        extraireValeurApresLabel('Lito de naissance', lignes);
+  infos.centreEnregistrement = extraireValeurApresLabel("Centre d'enregistrement", lignes) ||
+                               extraireValeurApresLabel("Centre fenregistrement", lignes);
+  infos.adresseDomicile = extraireValeurApresLabel("Adresse du domicile", lignes) ||
+                          extraireValeurApresLabel("Adresse di domible", lignes);
 
-  // LIEU DE NAISSANCE
-  match = ocrText.match(/Lieu\s*de\s*naissance\s*:?\s*([A-Za-z\s]+?)(?:\n|$)/i);
-  if (!match) match = ocrText.match(/Lito\s*de\s*naissance\s*:?\s*([A-Za-z\s]+?)(?:\n|$)/i);
-  if (match) infos.lieuNaissance = match[1].trim();
+  // Numéro de pièce (recherche spécifique)
+  let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*:?\s*([\d\s]+)/i);
+  if (!match) match = ocrText.match(/\b(\d{15,})\b/);
+  if (match) infos.numeroPiece = match[1].replace(/\s/g, '');
 
-  // NUMÉRO DE PIÈCE
-  match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*\n\s*([\d\s]+)/i);
-  if (match) {
-    infos.numeroPiece = match[1].replace(/\s/g, '');
-  } else {
-    match = ocrText.match(/\b(\d{15,})\b/);
-    if (match) infos.numeroPiece = match[1];
-  }
-
-  // DATE NAISSANCE, SEXE, TAILLE
+  // Date naissance, sexe, taille (ligne avec trois valeurs)
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+([MF])\s+(\d{2,3})\s*cm/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
@@ -97,7 +110,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     }
   }
 
-  // DATES DÉLIVRANCE / EXPIRATION
+  // Dates délivrance / expiration
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
   if (match) {
     const [j1, m1, a1] = match[1].split('/');
@@ -106,15 +119,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     infos.dateExpiration = `${a2}-${m2}-${j2}`;
   }
 
-  // CENTRE D'ENREGISTREMENT
-  match = ocrText.match(/Centre\s*[fd]?enregistrement\s*:?\s*([A-Za-z\s\/]+?)(?:\n|$)/i);
-  if (match) infos.centreEnregistrement = match[1].trim();
-
-  // ADRESSE DOMICILE
-  match = ocrText.match(/Adresse\s*(?:du|di)\s*(?:domicile|domible)\s*:?\s*([A-Za-z\s]+?)(?:\n|$)/i);
-  if (match) infos.adresseDomicile = match[1].trim();
-
-  // TYPE DE PIÈCE
+  // Type de pièce
   const upper = ocrText.toUpperCase();
   if (upper.includes("CARTE D'IDENTITE CEDEAO") || upper.includes('ECOWAS IDENTITY CARD'))
     infos.typePiece = 'CARTE_IDENTITE_CEDEAO';
@@ -123,7 +128,7 @@ const extraireInfosDepuisVeryfi = (data) => {
   else if (upper.includes('CARTE DE SEJOUR')) infos.typePiece = 'CARTE_SEJOUR';
   else if (upper.includes('CARTE CONSULAIRE')) infos.typePiece = 'CARTE_CONSULAIRE';
 
-  // NETTOYAGE
+  // Nettoyage
   const nettoyer = (str) => str ? str.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').replace(/\s+/g, ' ').trim() : null;
   infos.nom = nettoyer(infos.nom);
   infos.prenom = nettoyer(infos.prenom);
