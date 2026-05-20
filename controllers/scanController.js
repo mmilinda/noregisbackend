@@ -62,31 +62,38 @@ const extraireInfosDepuisVeryfi = (data) => {
     adresseDomicile: null,
   };
 
-  // ─── Parcours ligne par ligne pour extraire les champs simples ───
-  for (let i = 0; i < lignes.length; i++) {
-    const ligne = lignes[i].toLowerCase();
+  // ─── Fonction pour extraire une valeur associée à un label (gère "Label : Valeur" ou "Label" puis ligne suivante) ───
+  const extraireValeur = (labelRegex, lignes) => {
+    for (let i = 0; i < lignes.length; i++) {
+      const ligne = lignes[i];
+      // Cas 1 : "Label : Valeur" sur la même ligne
+      const match = ligne.match(new RegExp(`^${labelRegex}\\s*:?\\s*(.*)$`, 'i'));
+      if (match) {
+        const valeur = match[1].trim();
+        if (valeur) return valeur;
+      }
+      // Cas 2 : "Label" seul sur sa ligne
+      if (ligne.match(new RegExp(`^${labelRegex}$`, 'i'))) {
+        if (i + 1 < lignes.length) {
+          const valeurSuivante = lignes[i + 1].trim();
+          if (valeurSuivante && !valeurSuivante.match(/^[A-Z\s]{2,}$/i)) {
+            return valeurSuivante;
+          }
+        }
+      }
+    }
+    return null;
+  };
 
-    // Prénom (label exact "prénom" ou "prenom")
-    if (ligne === 'prénom' || ligne === 'prenom') {
-      if (i + 1 < lignes.length) infos.prenom = lignes[i + 1];
-    }
-    // Nom
-    else if (ligne === 'nom') {
-      if (i + 1 < lignes.length) infos.nom = lignes[i + 1];
-    }
-    // Lieu de naissance (gère "lieu de naissance" ou "lito de naissance")
-    else if (ligne.includes('lieu de naissance') || ligne.includes('lito de naissance')) {
-      if (i + 1 < lignes.length) infos.lieuNaissance = lignes[i + 1];
-    }
-    // Centre d'enregistrement (gère "centre d'enregistrement" ou "centre fenregistrement")
-    else if (ligne.includes('centre') && (ligne.includes('enregistrement') || ligne.includes('fenregistrement'))) {
-      if (i + 1 < lignes.length) infos.centreEnregistrement = lignes[i + 1];
-    }
-    // Adresse du domicile
-    else if (ligne.includes('adresse') && (ligne.includes('domicile') || ligne.includes('domible'))) {
-      if (i + 1 < lignes.length) infos.adresseDomicile = lignes[i + 1];
-    }
-  }
+  // ─── Extraction des champs textuels ───
+  infos.prenom = extraireValeur('Pr[ée]nom', lignes);
+  if (!infos.prenom) infos.prenom = extraireValeur('Prenom', lignes);
+  infos.nom = extraireValeur('Nom', lignes);
+  infos.lieuNaissance = extraireValeur('Lieu\\s*de\\s*naissance', lignes) ||
+                        extraireValeur('Lito\\s*de\\s*naissance', lignes);
+  infos.centreEnregistrement = extraireValeur('Centre\\s*[fd]?enregistrement', lignes);
+  infos.adresseDomicile = extraireValeur('Adresse\\s*du\\s*domicile', lignes) ||
+                          extraireValeur('Adresse\\s*di\\s*domible', lignes);
 
   // ─── Numéro de pièce ───
   let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*\n\s*([\d\s]+)/i);
@@ -97,7 +104,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     if (match) infos.numeroPiece = match[1];
   }
 
-  // ─── Date de naissance, sexe, taille (ligne unique) ───
+  // ─── Date naissance, sexe, taille (ligne unique) ───
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+([MF])\s+(\d{2,3})\s*cm/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
@@ -112,7 +119,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     }
   }
 
-  // ─── Dates de délivrance et d'expiration ───
+  // ─── Dates délivrance / expiration ───
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
   if (match) {
     const [j1, m1, a1] = match[1].split('/');
@@ -130,7 +137,7 @@ const extraireInfosDepuisVeryfi = (data) => {
   else if (upper.includes('CARTE DE SEJOUR')) infos.typePiece = 'CARTE_SEJOUR';
   else if (upper.includes('CARTE CONSULAIRE')) infos.typePiece = 'CARTE_CONSULAIRE';
 
-  // ─── Nettoyage final (supprime caractères spéciaux, espaces multiples) ───
+  // ─── Nettoyage final ───
   const nettoyer = (str) => str ? str.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').replace(/\s+/g, ' ').trim() : null;
   infos.nom = nettoyer(infos.nom);
   infos.prenom = nettoyer(infos.prenom);
