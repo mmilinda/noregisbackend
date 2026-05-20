@@ -1,5 +1,60 @@
+const { Document } = require('../models');
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+
+const VERYFI_CLIENT_ID     = process.env.VERYFI_CLIENT_ID;
+const VERYFI_CLIENT_SECRET = process.env.VERYFI_CLIENT_SECRET;
+const VERYFI_USERNAME      = process.env.VERYFI_USERNAME;
+const VERYFI_API_KEY       = process.env.VERYFI_API_KEY;
+const VERYFI_API_URL       = 'https://api.veryfi.com/api/v8/partner/documents';
+
+const scannerImage = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
+
+    const cheminFichier = req.file.path;
+    const document = await Document.create({
+      nomFichier:    req.file.filename,
+      cheminFichier,
+      typeMime:      req.file.mimetype,
+      tailleFichier: req.file.size,
+    });
+
+    const form = new FormData();
+    form.append('file', fs.createReadStream(cheminFichier));
+    const response = await axios.post(VERYFI_API_URL, form, {
+      headers: {
+        ...form.getHeaders(),
+        'CLIENT-ID': VERYFI_CLIENT_ID,
+        'AUTHORIZATION': `apikey ${VERYFI_USERNAME}:${VERYFI_API_KEY}`,
+      },
+    });
+
+    const data = response.data;
+    console.log('✅ Veryfi response:', data);
+    const infosExtraites = extraireInfosDepuisVeryfi(data);
+
+    const io = req.app.get('io');
+    if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
+
+    return res.json({
+      success: true,
+      message: 'Scan terminé via Veryfi.',
+      document: { id: document._id, nomFichier: document.nomFichier },
+      infosExtraites,
+      texteRaw: data.ocr_text || '',
+    });
+  } catch (err) {
+    console.error('Veryfi error:', err.response?.data || err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const extraireInfosDepuisVeryfi = (data) => {
   const ocrText = data.ocr_text || '';
+  const lignes = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
   const infos = {
     nom: null, prenom: null, dateNaissance: null, numeroPiece: null,
     typePiece: 'CNI', sexe: null, taille: null, lieuNaissance: null,
@@ -7,21 +62,34 @@ const extraireInfosDepuisVeryfi = (data) => {
     adresseDomicile: null,
   };
 
-  // ─── PRÉNOM (identique à la regex Python) ───
-  let match = ocrText.match(/Pr[ée]nom\s*:?\s*([A-Za-z\s]+?)(?:\n|Date|$)/i);
-  if (match) infos.prenom = match[1].trim();
+  // ─── Parcours ligne par ligne pour extraire les champs simples ───
+  for (let i = 0; i < lignes.length; i++) {
+    const ligne = lignes[i].toLowerCase();
 
-  // ─── NOM ───
-  match = ocrText.match(/Nom\s*:?\s*([A-Za-z\s]+?)(?:\n|Prénom|$)/i);
-  if (match) infos.nom = match[1].trim();
+    // Prénom (label exact "prénom" ou "prenom")
+    if (ligne === 'prénom' || ligne === 'prenom') {
+      if (i + 1 < lignes.length) infos.prenom = lignes[i + 1];
+    }
+    // Nom
+    else if (ligne === 'nom') {
+      if (i + 1 < lignes.length) infos.nom = lignes[i + 1];
+    }
+    // Lieu de naissance (gère "lieu de naissance" ou "lito de naissance")
+    else if (ligne.includes('lieu de naissance') || ligne.includes('lito de naissance')) {
+      if (i + 1 < lignes.length) infos.lieuNaissance = lignes[i + 1];
+    }
+    // Centre d'enregistrement (gère "centre d'enregistrement" ou "centre fenregistrement")
+    else if (ligne.includes('centre') && (ligne.includes('enregistrement') || ligne.includes('fenregistrement'))) {
+      if (i + 1 < lignes.length) infos.centreEnregistrement = lignes[i + 1];
+    }
+    // Adresse du domicile
+    else if (ligne.includes('adresse') && (ligne.includes('domicile') || ligne.includes('domible'))) {
+      if (i + 1 < lignes.length) infos.adresseDomicile = lignes[i + 1];
+    }
+  }
 
-  // ─── LIEU DE NAISSANCE ───
-  match = ocrText.match(/Lieu\s*de\s*naissance\s*:?\s*([A-Za-z\s]+?)(?:\n|$)/i);
-  if (!match) match = ocrText.match(/Lito\s*de\s*naissance\s*:?\s*([A-Za-z\s]+?)(?:\n|$)/i);
-  if (match) infos.lieuNaissance = match[1].trim();
-
-  // ─── NUMÉRO DE PIÈCE ───
-  match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*\n\s*([\d\s]+)/i);
+  // ─── Numéro de pièce ───
+  let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*\n\s*([\d\s]+)/i);
   if (match) {
     infos.numeroPiece = match[1].replace(/\s/g, '');
   } else {
@@ -29,7 +97,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     if (match) infos.numeroPiece = match[1];
   }
 
-  // ─── DATE NAISSANCE, SEXE, TAILLE ───
+  // ─── Date de naissance, sexe, taille (ligne unique) ───
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+([MF])\s+(\d{2,3})\s*cm/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
@@ -44,7 +112,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     }
   }
 
-  // ─── DATES DÉLIVRANCE / EXPIRATION ───
+  // ─── Dates de délivrance et d'expiration ───
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
   if (match) {
     const [j1, m1, a1] = match[1].split('/');
@@ -53,15 +121,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     infos.dateExpiration = `${a2}-${m2}-${j2}`;
   }
 
-  // ─── CENTRE D'ENREGISTREMENT ───
-  match = ocrText.match(/Centre\s*[fd]?enregistrement\s*:?\s*([A-Za-z\s\/]+?)(?:\n|$)/i);
-  if (match) infos.centreEnregistrement = match[1].trim();
-
-  // ─── ADRESSE DOMICILE ───
-  match = ocrText.match(/Adresse\s*(?:du|di)\s*(?:domicile|domible)\s*:?\s*([A-Za-z\s]+?)(?:\n|$)/i);
-  if (match) infos.adresseDomicile = match[1].trim();
-
-  // ─── TYPE DE PIÈCE ───
+  // ─── Type de pièce ───
   const upper = ocrText.toUpperCase();
   if (upper.includes("CARTE D'IDENTITE CEDEAO") || upper.includes('ECOWAS IDENTITY CARD'))
     infos.typePiece = 'CARTE_IDENTITE_CEDEAO';
@@ -70,7 +130,7 @@ const extraireInfosDepuisVeryfi = (data) => {
   else if (upper.includes('CARTE DE SEJOUR')) infos.typePiece = 'CARTE_SEJOUR';
   else if (upper.includes('CARTE CONSULAIRE')) infos.typePiece = 'CARTE_CONSULAIRE';
 
-  // ─── NETTOYAGE FINAL (supprime caractères spéciaux et espaces multiples) ───
+  // ─── Nettoyage final (supprime caractères spéciaux, espaces multiples) ───
   const nettoyer = (str) => str ? str.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').replace(/\s+/g, ' ').trim() : null;
   infos.nom = nettoyer(infos.nom);
   infos.prenom = nettoyer(infos.prenom);
@@ -80,3 +140,5 @@ const extraireInfosDepuisVeryfi = (data) => {
 
   return infos;
 };
+
+module.exports = { scannerImage };
