@@ -81,9 +81,9 @@ const extraireInfosDepuisVeryfi = (data) => {
     adresseDomicile: null,
   };
 
-  // Type de pièce
+  // ── Type de pièce ────────────────────────────────────────────────
   const upper = ocrText.toUpperCase();
-  if (upper.includes('CARTE D\'IDENTITE CEDEAO') || upper.includes('ECOWAS IDENTITY CARD')) {
+  if (upper.includes("CARTE D'IDENTITE CEDEAO") || upper.includes('ECOWAS IDENTITY CARD')) {
     infos.typePiece = 'CARTE_IDENTITE_CEDEAO';
   } else if (upper.includes('PASSEPORT')) {
     infos.typePiece = 'PASSEPORT';
@@ -95,7 +95,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     infos.typePiece = 'CARTE_CONSULAIRE';
   }
 
-  // Numéro de pièce (recherche du long nombre)
+  // ── Numéro de pièce ──────────────────────────────────────────────
   let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*\n\s*([\d\s]+)/i);
   if (match) {
     infos.numeroPiece = match[1].replace(/\s/g, '');
@@ -104,33 +104,55 @@ const extraireInfosDepuisVeryfi = (data) => {
     if (match) infos.numeroPiece = match[1];
   }
 
-  // Parcours ligne par ligne
-  for (let i = 0; i < lignes.length; i++) {
-    const ligne = lignes[i].toLowerCase();
-    
-    // Prénom
-    if (ligne === 'prénom' || ligne === 'prenom') {
-      if (i + 1 < lignes.length) infos.prenom = lignes[i + 1];
+  // ── Fonction utilitaire pour extraire une valeur après un label ──
+  const extraireValeur = (labelRegex, lignes, options = {}) => {
+    const { surLigneSuivante = true } = options;
+    for (let i = 0; i < lignes.length; i++) {
+      const ligne = lignes[i];
+      if (labelRegex.test(ligne)) {
+        // Valeur sur la même ligne après le label
+        let valeur = ligne.replace(labelRegex, '').replace(/^\s*:?\s*/, '').trim();
+        if (valeur) {
+          return valeur;
+        }
+        // Valeur sur la ligne suivante
+        if (surLigneSuivante && i + 1 < lignes.length) {
+          const suivante = lignes[i + 1];
+          // Éviter de prendre une autre étiquette (en majuscules)
+          if (!/^[A-Z\s]{2,}$/.test(suivante) || suivante.length < 2) {
+            return suivante;
+          }
+        }
+      }
     }
-    // Nom
-    else if (ligne === 'nom') {
-      if (i + 1 < lignes.length) infos.nom = lignes[i + 1];
-    }
-    // Lieu de naissance
-    else if (ligne.includes('lieu de naissance') || ligne.includes('lito de naissance')) {
-      if (i + 1 < lignes.length) infos.lieuNaissance = lignes[i + 1];
-    }
-    // Centre d'enregistrement
-    else if (ligne.includes('centre') && (ligne.includes('enregistrement') || ligne.includes('fenregistrement'))) {
-      if (i + 1 < lignes.length) infos.centreEnregistrement = lignes[i + 1];
-    }
-    // Adresse
-    else if (ligne.includes('adresse') && (ligne.includes('domicile') || ligne.includes('domible'))) {
-      if (i + 1 < lignes.length) infos.adresseDomicile = lignes[i + 1];
-    }
-  }
+    return null;
+  };
 
-  // Date naissance, sexe, taille (ligne avec trois valeurs)
+  // ── Prénom (gère "Prénom", "Prénom :", "Prenom :", etc.) ─────────
+  let prenom = extraireValeur(/^Pr[ée]nom\s*:?$/i, lignes);
+  if (!prenom) prenom = extraireValeur(/^Pr[ée]nom$/i, lignes);
+  infos.prenom = prenom ? prenom.trim() : null;
+
+  // ── Nom ──────────────────────────────────────────────────────────
+  let nom = extraireValeur(/^Nom\s*:?$/i, lignes);
+  if (!nom) nom = extraireValeur(/^Nom$/i, lignes);
+  infos.nom = nom ? nom.trim() : null;
+
+  // ── Lieu de naissance (gère "Lieu de naissance" ou "Lito de naissance") ──
+  let lieu = extraireValeur(/^Lieu\s*de\s*naissance\s*:?$/i, lignes);
+  if (!lieu) lieu = extraireValeur(/^Lito\s*de\s*naissance\s*:?$/i, lignes);
+  infos.lieuNaissance = lieu ? lieu.trim() : null;
+
+  // ── Centre d'enregistrement (gère "Centre d'enregistrement" ou "Centre fenregistrement") ──
+  let centre = extraireValeur(/^Centre\s*[fd]?enregistrement\s*:?$/i, lignes);
+  infos.centreEnregistrement = centre ? centre.trim() : null;
+
+  // ── Adresse (gère "Adresse du domicile" ou "Adresse di domible") ──
+  let adresse = extraireValeur(/^Adresse\s*du\s*domicile\s*:?$/i, lignes);
+  if (!adresse) adresse = extraireValeur(/^Adresse\s*di\s*domible\s*:?$/i, lignes);
+  infos.adresseDomicile = adresse ? adresse.trim() : null;
+
+  // ── Date naissance, sexe, taille (ligne avec trois valeurs) ────────
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+([MF])\s+(\d{2,3})\s*cm/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
@@ -146,7 +168,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     }
   }
 
-  // Dates délivrance / expiration (deux dates sur la même ligne)
+  // ── Dates délivrance / expiration (deux dates sur la même ligne) ──
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
   if (match) {
     const [j1, m1, a1] = match[1].split('/');
@@ -155,7 +177,7 @@ const extraireInfosDepuisVeryfi = (data) => {
     infos.dateExpiration = `${a2}-${m2}-${j2}`;
   }
 
-  // Nettoyage des champs texte
+  // ── Nettoyage des champs texte (supprime caractères spéciaux, espaces multiples) ──
   const nettoyer = (str) => {
     if (!str) return null;
     return str.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').replace(/\s+/g, ' ').trim();
@@ -168,7 +190,8 @@ const extraireInfosDepuisVeryfi = (data) => {
 
   return infos;
 };
-/* ── UTILITAIRES (conservés) ─────────────────────────────────────────── */
+
+/* ── UTILITAIRES (conservés pour compatibilité, mais non utilisés directement) ── */
 const nettoyer = (str) => {
   if (!str) return null;
   return str
@@ -217,7 +240,6 @@ const isValidNom = (s) => {
 };
 
 const extraireChamp = (lignes, labelRegex, labelsAIgnorerRegex = null) => {
-  // ... (fonction inchangée, conservée pour compatibilité)
   for (let i = 0; i < lignes.length; i++) {
     const ligne = lignes[i];
     if (!labelRegex.test(ligne)) continue;
