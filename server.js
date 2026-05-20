@@ -31,6 +31,7 @@ app.use('/api/visiteurs', require('./routes/visiteurs'));
 app.use('/api/visites',   require('./routes/visites'));
 app.use('/api/scan',      require('./routes/scan'));
 app.use('/api/search',    require('./routes/search'));
+app.use('/api/demandes',  require('./routes/demandes'));
 
 app.get('/', (req, res) => {
   res.json({ message: 'Registre Visiteurs API — OK', version: '1.0.0' });
