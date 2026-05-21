@@ -162,14 +162,17 @@ const genererQrAgent = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Agent introuvable.' });
     }
 
-    const frontendUrl = (process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
-    const qrUrl = `${frontendUrl}/scan/${agent._id}`;
-    const qrCodeData = await QRCode.toDataURL(qrUrl);
+    const scanPath = `/scan/${agent._id}`;
+    const frontendUrl = (process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || '').replace(/\/+$/, '');
+    const fullQrUrl = frontendUrl ? `${frontendUrl}${scanPath}` : `http://localhost:5173${scanPath}`;
+    
+    const qrCodeData = await QRCode.toDataURL(fullQrUrl);
 
     res.json({
       success: true,
       message: 'QR code généré.',
-      qrUrl,
+      qrUrl: fullQrUrl,
+      qrPath: scanPath,
       qrCodeData,
       agent: {
         id: agent._id,
