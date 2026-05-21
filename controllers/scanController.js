@@ -83,7 +83,8 @@ const extraireInfosDepuisVeryfi = (data) => {
   infos.prenom = extraireValeurApresLabel('Prénoms', lignes) ||
                  extraireValeurApresLabel('Prénom', lignes);
   infos.nom = extraireValeurApresLabel('Nom', lignes);
-  infos.lieuNaissance = extraireValeurApresLabel('Lieu\\s*de\\s*naissance|Lito\\s*de\\s*naissance', lignes);
+  infos.lieuNaissance = extraireValeurApresLabel('Lieu de naissance', lignes) ||
+                        extraireValeurApresLabel('Lito de naissance', lignes);
   infos.centreEnregistrement = extraireValeurApresLabel("Centre d'enregistrement", lignes) ||
                                extraireValeurApresLabel("Centre fenregistrement", lignes);
   infos.adresseDomicile = extraireValeurApresLabel("Adresse du domicile", lignes) ||
