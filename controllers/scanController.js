@@ -62,40 +62,37 @@ const extraireInfosDepuisVeryfi = (data) => {
     adresseDomicile: null,
   };
 
-  // Fonction pour extraire une valeur après un label
-  const extraireValeurApresLabel = (label, lignes) => {
-    const labelLower = label.toLowerCase();
+  // Fonction robuste pour extraire une valeur après un label
+  const extraireValeurApresLabel = (labelRegex, lignes) => {
     for (let i = 0; i < lignes.length; i++) {
       const ligne = lignes[i];
-      if (ligne.toLowerCase().startsWith(labelLower)) {
-        // Vérifier si la valeur est sur la même ligne après un ':'
-        const partie = ligne.substring(label.length);
-        let valeur = partie.replace(/^[\s:]+/, '').trim();
+      // Cherche le label (insensible à la casse) suivi éventuellement de ':' 
+      const match = ligne.match(new RegExp(`(${labelRegex})\\s*:?\\s*(.*)`, 'i'));
+      if (match) {
+        const valeur = match[2].trim();
         if (valeur) return valeur;
-        // Sinon, prendre la ligne suivante
+      }
+      // Si la ligne contient exactement le label (seul), on prend la ligne suivante
+      if (ligne.match(new RegExp(`^${labelRegex}$`, 'i'))) {
         if (i + 1 < lignes.length) return lignes[i + 1].trim();
       }
     }
     return null;
   };
 
-  // Extraction des champs texte avec gestion des variantes
-  infos.prenom = extraireValeurApresLabel('Prénoms', lignes) ||
-                 extraireValeurApresLabel('Prénom', lignes);
-  infos.nom = extraireValeurApresLabel('Nom', lignes);
-  infos.lieuNaissance = extraireValeurApresLabel('Lieu de naissance', lignes) ||
-                        extraireValeurApresLabel('Lito de naissance', lignes);
-  infos.centreEnregistrement = extraireValeurApresLabel("Centre d'enregistrement", lignes) ||
-                               extraireValeurApresLabel("Centre fenregistrement", lignes);
-  infos.adresseDomicile = extraireValeurApresLabel("Adresse du domicile", lignes) ||
-                          extraireValeurApresLabel("Adresse di domible", lignes);
+  // Extraction des champs texte
+  infos.prenom = extraireValeurApresLabel('Pr[ée]noms?', lignes);
+  infos.nom    = extraireValeurApresLabel('Nom', lignes);
+  infos.lieuNaissance = extraireValeurApresLabel('Lieu\\s*de\\s*naissance|Lito\\s*de\\s*naissance', lignes);
+  infos.centreEnregistrement = extraireValeurApresLabel('Centre\\s*[fd]?enregistrement', lignes);
+  infos.adresseDomicile = extraireValeurApresLabel('Adresse\\s*(?:du|di)\\s*(?:domicile|domible)', lignes);
 
-  // Numéro de pièce (recherche spécifique)
+  // Numéro de pièce
   let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*:?\s*([\d\s]+)/i);
   if (!match) match = ocrText.match(/\b(\d{15,})\b/);
   if (match) infos.numeroPiece = match[1].replace(/\s/g, '');
 
-  // Date naissance, sexe, taille (ligne avec trois valeurs)
+  // Date naissance, sexe, taille
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+([MF])\s+(\d{2,3})\s*cm/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
@@ -128,7 +125,7 @@ const extraireInfosDepuisVeryfi = (data) => {
   else if (upper.includes('CARTE DE SEJOUR')) infos.typePiece = 'CARTE_SEJOUR';
   else if (upper.includes('CARTE CONSULAIRE')) infos.typePiece = 'CARTE_CONSULAIRE';
 
-  // Nettoyage
+  // Nettoyage final
   const nettoyer = (str) => str ? str.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').replace(/\s+/g, ' ').trim() : null;
   infos.nom = nettoyer(infos.nom);
   infos.prenom = nettoyer(infos.prenom);
