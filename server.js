@@ -30,6 +30,7 @@ app.use('/api/auth',      require('./routes/auth'));
 app.use('/api/visiteurs', require('./routes/visiteurs'));
 app.use('/api/visites',   require('./routes/visites'));
 app.use('/api/scan',      require('./routes/scan'));
+app.use('/api/public-scan', require('./routes/publicScan'));
 app.use('/api/search',    require('./routes/search'));
 app.use('/api/demandes',  require('./routes/demandes'));
 

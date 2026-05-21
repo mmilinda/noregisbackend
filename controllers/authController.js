@@ -153,4 +153,31 @@ const toggleActif = async (req, res) => {
   }
 };
 
-module.exports = { login, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif };
+const genererQrAgent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const agent = await Utilisateur.findById(id);
+    if (!agent) {
+      return res.status(404).json({ success: false, message: 'Agent introuvable.' });
+    }
+
+    const scanPath = `/scan/${agent._id}`;
+
+    res.json({
+      success: true,
+      message: 'Lien de scan généré.',
+      qrPath: scanPath,
+      agent: {
+        id: agent._id,
+        nom: agent.nom,
+        prenom: agent.prenom,
+        email: agent.email,
+      },
+    });
+  } catch (err) {
+    console.error('Erreur génération QR :', err);
+    res.status(500).json({ success: false, message: 'Impossible de générer le QR code.' });
+  }
+};
+
+module.exports = { login, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent };
