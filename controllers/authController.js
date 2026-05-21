@@ -1,4 +1,5 @@
 const jwt         = require('jsonwebtoken');
+const QRCode      = require('qrcode');
 const Utilisateur = require('../models/Utilisateur');
 
 // Champs de profil éditables (sauf mot de passe et role qui ont leurs propres endpoints)
@@ -153,4 +154,34 @@ const toggleActif = async (req, res) => {
   }
 };
 
-module.exports = { login, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif };
+const genererQrAgent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const agent = await Utilisateur.findById(id);
+    if (!agent) {
+      return res.status(404).json({ success: false, message: 'Agent introuvable.' });
+    }
+
+    const frontendUrl = (process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const qrUrl = `${frontendUrl}/scan/${agent._id}`;
+    const qrCodeData = await QRCode.toDataURL(qrUrl);
+
+    res.json({
+      success: true,
+      message: 'QR code généré.',
+      qrUrl,
+      qrCodeData,
+      agent: {
+        id: agent._id,
+        nom: agent.nom,
+        prenom: agent.prenom,
+        email: agent.email,
+      },
+    });
+  } catch (err) {
+    console.error('Erreur génération QR :', err);
+    res.status(500).json({ success: false, message: 'Impossible de générer le QR code.' });
+  }
+};
+
+module.exports = { login, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent };
