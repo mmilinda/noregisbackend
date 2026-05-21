@@ -1,5 +1,4 @@
 const jwt         = require('jsonwebtoken');
-const QRCode      = require('qrcode');
 const Utilisateur = require('../models/Utilisateur');
 
 // Champs de profil éditables (sauf mot de passe et role qui ont leurs propres endpoints)
@@ -163,17 +162,11 @@ const genererQrAgent = async (req, res) => {
     }
 
     const scanPath = `/scan/${agent._id}`;
-    const frontendUrl = (process.env.FRONTEND_URL || process.env.VITE_FRONTEND_URL || '').replace(/\/+$/, '');
-    const fullQrUrl = frontendUrl ? `${frontendUrl}${scanPath}` : `http://localhost:5173${scanPath}`;
-    
-    const qrCodeData = await QRCode.toDataURL(fullQrUrl);
 
     res.json({
       success: true,
-      message: 'QR code généré.',
-      qrUrl: fullQrUrl,
+      message: 'Lien de scan généré.',
       qrPath: scanPath,
-      qrCodeData,
       agent: {
         id: agent._id,
         nom: agent.nom,
