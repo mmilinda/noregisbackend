@@ -13,7 +13,10 @@ const scannerImage = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
 
+    const mode = req.query.mode || 'recto'; // 'recto' ou 'verso'
     const cheminFichier = req.file.path;
+
+    // Sauvegarde facultative du document
     const document = await Document.create({
       nomFichier:    req.file.filename,
       cheminFichier,
@@ -32,25 +35,46 @@ const scannerImage = async (req, res) => {
     });
 
     const data = response.data;
-    console.log('✅ Veryfi response:', data);
-    const infosExtraites = extraireInfosDepuisVeryfi(data);
+    const ocrText = data.ocr_text || '';
 
-    const io = req.app.get('io');
-    if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
-
-    return res.json({
-      success: true,
-      message: 'Scan terminé via Veryfi.',
-      document: { id: document._id, nomFichier: document.nomFichier },
-      infosExtraites,
-      texteRaw: data.ocr_text || '',
-    });
+    if (mode === 'verso') {
+      // --- Extrait uniquement le NIN ---
+      const nin = extraireNIN(ocrText);
+      if (!nin) {
+        return res.status(422).json({ success: false, message: 'Aucun NIN trouvé sur le verso.' });
+      }
+      return res.json({ success: true, nin });
+    } else {
+      // --- Mode recto : extrait toutes les informations ---
+      const infosExtraites = extraireInfosDepuisVeryfi(data);
+      if (!infosExtraites.nom || !infosExtraites.prenom || !infosExtraites.numeroPiece) {
+        return res.status(422).json({ success: false, message: 'Recto illisible : nom, prénom ou numéro de pièce manquant.' });
+      }
+      const io = req.app.get('io');
+      if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
+      return res.json({
+        success: true,
+        message: 'Scan recto terminé.',
+        document: { id: document._id, nomFichier: document.nomFichier },
+        infosExtraites,
+        texteRaw: ocrText,
+      });
+    }
   } catch (err) {
     console.error('Veryfi error:', err.response?.data || err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 };
 
+// Extrait le NIN (recherche "NIN : 1234567890123" ou 13 chiffres)
+function extraireNIN(ocrText) {
+  const textUpper = ocrText.toUpperCase();
+  let match = textUpper.match(/\bNIN\s*[:\-]?\s*(\d{13})\b/i);
+  if (!match) match = textUpper.match(/\b(\d{13})\b/);
+  return match ? match[1] : null;
+}
+
+// === Votre fonction existante (inchangée) ===
 const extraireInfosDepuisVeryfi = (data) => {
   const ocrText = data.ocr_text || '';
   const lignes = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -62,24 +86,20 @@ const extraireInfosDepuisVeryfi = (data) => {
     adresseDomicile: null,
   };
 
-  // Fonction pour extraire une valeur après un label
   const extraireValeurApresLabel = (label, lignes) => {
     const labelLower = label.toLowerCase();
     for (let i = 0; i < lignes.length; i++) {
       const ligne = lignes[i];
       if (ligne.toLowerCase().startsWith(labelLower)) {
-        // Vérifier si la valeur est sur la même ligne après un ':'
         const partie = ligne.substring(label.length);
         let valeur = partie.replace(/^[\s:]+/, '').trim();
         if (valeur) return valeur;
-        // Sinon, prendre la ligne suivante
         if (i + 1 < lignes.length) return lignes[i + 1].trim();
       }
     }
     return null;
   };
 
-  // Extraction des champs texte avec gestion des variantes
   infos.prenom = extraireValeurApresLabel('Prénoms', lignes) ||
                  extraireValeurApresLabel('Prénom', lignes);
   infos.nom = extraireValeurApresLabel('Nom', lignes);
@@ -90,12 +110,10 @@ const extraireInfosDepuisVeryfi = (data) => {
   infos.adresseDomicile = extraireValeurApresLabel("Adresse du domicile", lignes) ||
                           extraireValeurApresLabel("Adresse di domible", lignes);
 
-  // Numéro de pièce (recherche spécifique)
   let match = ocrText.match(/N°\s*de\s*la\s*carte\s*d['']identité\s*:?\s*([\d\s]+)/i);
   if (!match) match = ocrText.match(/\b(\d{15,})\b/);
   if (match) infos.numeroPiece = match[1].replace(/\s/g, '');
 
-  // Date naissance, sexe, taille (ligne avec trois valeurs)
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+([MF])\s+(\d{2,3})\s*cm/i);
   if (match) {
     const [j, m, a] = match[1].split('/');
@@ -110,7 +128,6 @@ const extraireInfosDepuisVeryfi = (data) => {
     }
   }
 
-  // Dates délivrance / expiration
   match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
   if (match) {
     const [j1, m1, a1] = match[1].split('/');
@@ -119,7 +136,6 @@ const extraireInfosDepuisVeryfi = (data) => {
     infos.dateExpiration = `${a2}-${m2}-${j2}`;
   }
 
-  // Type de pièce
   const upper = ocrText.toUpperCase();
   if (upper.includes("CARTE D'IDENTITE CEDEAO") || upper.includes('ECOWAS IDENTITY CARD'))
     infos.typePiece = 'CARTE_IDENTITE_CEDEAO';
@@ -128,7 +144,6 @@ const extraireInfosDepuisVeryfi = (data) => {
   else if (upper.includes('CARTE DE SEJOUR')) infos.typePiece = 'CARTE_SEJOUR';
   else if (upper.includes('CARTE CONSULAIRE')) infos.typePiece = 'CARTE_CONSULAIRE';
 
-  // Nettoyage
   const nettoyer = (str) => str ? str.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').replace(/\s+/g, ' ').trim() : null;
   infos.nom = nettoyer(infos.nom);
   infos.prenom = nettoyer(infos.prenom);
