@@ -6,10 +6,9 @@ const creerVisiteur = async (req, res) => {
       nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
       numeroPiece, typePiece, dateDelivrance, dateExpiration,
       centreEnregistrement, adresseDomicile,
-      nin                              // 👈 NOUVEAU : récupération du NIN
+      nin
     } = req.body;
 
-    // Vérifier unicité du numéro de pièce
     const existeDeja = await Visiteur.findOne({ numeroPiece });
     if (existeDeja) {
       return res.status(200).json({
@@ -21,12 +20,11 @@ const creerVisiteur = async (req, res) => {
       });
     }
 
-    // Création du visiteur avec tous les champs, y compris nin
     const visiteur = await Visiteur.create({
       nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
       numeroPiece, typePiece, dateDelivrance, dateExpiration,
       centreEnregistrement, adresseDomicile,
-      nin                                  // 👈 sauvegarde du NIN
+      nin
     });
 
     res.status(201).json({
@@ -72,7 +70,6 @@ const getVisiteur = async (req, res) => {
 
 const modifierVisiteur = async (req, res) => {
   try {
-    // On autorise aussi la modification du nin
     const visiteur = await Visiteur.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -85,4 +82,38 @@ const modifierVisiteur = async (req, res) => {
   }
 };
 
-module.exports = { creerVisiteur, listerVisiteurs, getVisiteur, modifierVisiteur };
+// 👇 NOUVELLE FONCTION : suppression en cascade
+const supprimerVisiteur = async (req, res) => {
+  try {
+    const visiteurId = req.params.id;
+
+    const visiteur = await Visiteur.findById(visiteurId);
+    if (!visiteur) {
+      return res.status(404).json({ success: false, message: 'Visiteur introuvable.' });
+    }
+
+    // Supprimer toutes les visites et documents liés
+    await Promise.all([
+      Visite.deleteMany({ visiteurId }),
+      Document.deleteMany({ visiteurId })
+    ]);
+
+    // Supprimer le visiteur
+    await Visiteur.findByIdAndDelete(visiteurId);
+
+    res.json({
+      success: true,
+      message: 'Visiteur et toutes ses données associées supprimés avec succès.'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = {
+  creerVisiteur,
+  listerVisiteurs,
+  getVisiteur,
+  modifierVisiteur,
+  supprimerVisiteur   // 👈 export de la nouvelle fonction
+};
