@@ -11,12 +11,14 @@ const VERYFI_API_URL       = 'https://api.veryfi.com/api/v8/partner/documents';
 
 const scannerImage = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
+    }
 
-    const mode = req.query.mode || 'recto'; // 'recto' ou 'verso'
+    const mode = req.query.mode || 'recto';
     const cheminFichier = req.file.path;
 
-    // Sauvegarde facultative du document
+    // Sauvegarde facultative du document (optionnel)
     const document = await Document.create({
       nomFichier:    req.file.filename,
       cheminFichier,
@@ -26,26 +28,37 @@ const scannerImage = async (req, res) => {
 
     const form = new FormData();
     form.append('file', fs.createReadStream(cheminFichier));
-    const response = await axios.post(VERYFI_API_URL, form, {
-      headers: {
-        ...form.getHeaders(),
-        'CLIENT-ID': VERYFI_CLIENT_ID,
-        'AUTHORIZATION': `apikey ${VERYFI_USERNAME}:${VERYFI_API_KEY}`,
-      },
-    });
 
-    const data = response.data;
+    let veryfiResponse;
+    try {
+      veryfiResponse = await axios.post(VERYFI_API_URL, form, {
+        headers: {
+          ...form.getHeaders(),
+          'CLIENT-ID': VERYFI_CLIENT_ID,
+          'AUTHORIZATION': `apikey ${VERYFI_USERNAME}:${VERYFI_API_KEY}`,
+        },
+        timeout: 30000, // 30 secondes
+      });
+    } catch (veryfiErr) {
+      console.error('Veryfi error details:', veryfiErr.response?.data || veryfiErr.message);
+      return res.status(500).json({
+        success: false,
+        message: `Erreur lors de l’analyse par Veryfi : ${veryfiErr.response?.data?.detail || veryfiErr.message}`,
+      });
+    }
+
+    const data = veryfiResponse.data;
     const ocrText = data.ocr_text || '';
 
     if (mode === 'verso') {
-      // --- Extrait uniquement le NIN ---
+      // Extraire le NIN
       const nin = extraireNIN(ocrText);
       if (!nin) {
         return res.status(422).json({ success: false, message: 'Aucun NIN trouvé sur le verso.' });
       }
       return res.json({ success: true, nin });
     } else {
-      // --- Mode recto : extrait toutes les informations ---
+      // Mode recto : extraire toutes les informations
       const infosExtraites = extraireInfosDepuisVeryfi(data);
       if (!infosExtraites.nom || !infosExtraites.prenom || !infosExtraites.numeroPiece) {
         return res.status(422).json({ success: false, message: 'Recto illisible : nom, prénom ou numéro de pièce manquant.' });
@@ -61,8 +74,8 @@ const scannerImage = async (req, res) => {
       });
     }
   } catch (err) {
-    console.error('Veryfi error:', err.response?.data || err.message);
-    return res.status(500).json({ success: false, message: err.message });
+    console.error('Erreur scanController:', err.stack);
+    return res.status(500).json({ success: false, message: err.message || 'Erreur interne du serveur' });
   }
 };
 
@@ -74,7 +87,7 @@ function extraireNIN(ocrText) {
   return match ? match[1] : null;
 }
 
-// === Votre fonction existante (inchangée) ===
+// === Fonction existante (inchangée) ===
 const extraireInfosDepuisVeryfi = (data) => {
   const ocrText = data.ocr_text || '';
   const lignes = ocrText.split('\n').map(l => l.trim()).filter(l => l.length > 0);

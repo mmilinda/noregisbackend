@@ -12,7 +12,6 @@ const app    = express();
 const server = http.createServer(app);
 const io     = new Server(server, { cors: { origin: '*' } });
 
-// Rendre io accessible dans tous les controllers
 app.set('io', io);
 
 io.on('connection', (socket) => {
@@ -20,7 +19,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('🔴 Socket déconnecté :', socket.id));
 });
 
-app.use(cors());
+// CORS explicite pour Safari
+app.use(cors({
+  origin: ['https://noresgistehtml.vercel.app', 'http://localhost:3000', 'https://noregisbackend.onrender.com'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
