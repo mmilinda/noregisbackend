@@ -23,6 +23,9 @@ const visiteurSchema = new mongoose.Schema({
   // Adresse
   adresseDomicile:  { type: String, maxlength: 255, default: null },
 
+  // NIN (verso)
+  nin:              { type: String, maxlength: 50, default: null }   // 👈 NOUVEAU CHAMP
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('Visiteur', visiteurSchema);

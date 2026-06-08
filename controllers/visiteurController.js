@@ -5,7 +5,8 @@ const creerVisiteur = async (req, res) => {
     const {
       nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
       numeroPiece, typePiece, dateDelivrance, dateExpiration,
-      centreEnregistrement, adresseDomicile
+      centreEnregistrement, adresseDomicile,
+      nin                              // 👈 NOUVEAU : récupération du NIN
     } = req.body;
 
     // Vérifier unicité du numéro de pièce
@@ -20,11 +21,12 @@ const creerVisiteur = async (req, res) => {
       });
     }
 
-    // Création du visiteur avec tous les champs
+    // Création du visiteur avec tous les champs, y compris nin
     const visiteur = await Visiteur.create({
       nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
       numeroPiece, typePiece, dateDelivrance, dateExpiration,
-      centreEnregistrement, adresseDomicile
+      centreEnregistrement, adresseDomicile,
+      nin                                  // 👈 sauvegarde du NIN
     });
 
     res.status(201).json({
@@ -70,6 +72,7 @@ const getVisiteur = async (req, res) => {
 
 const modifierVisiteur = async (req, res) => {
   try {
+    // On autorise aussi la modification du nin
     const visiteur = await Visiteur.findByIdAndUpdate(
       req.params.id,
       req.body,
