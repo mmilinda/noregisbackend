@@ -63,4 +63,24 @@ const visitesEnCours = async (req, res) => {
   }
 };
 
-module.exports = { enregistrerEntree, enregistrerSortie, listerVisites, visitesEnCours };
+// 👇 NOUVELLE FONCTION : suppression d'une visite
+const supprimerVisite = async (req, res) => {
+  try {
+    const visite = await Visite.findById(req.params.id);
+    if (!visite) {
+      return res.status(404).json({ success: false, message: 'Visite introuvable.' });
+    }
+    await Visite.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Visite supprimée avec succès.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = {
+  enregistrerEntree,
+  enregistrerSortie,
+  listerVisites,
+  visitesEnCours,
+  supprimerVisite   // 👈 export de la nouvelle fonction
+};
