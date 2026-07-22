@@ -5,12 +5,15 @@
 // et l'enregistrer ci-dessous, avant le fallback "generic".
 
 const passeport = require('./formats/passeport');
+const consulaire = require('./formats/consulaire');
 const sn = require('./formats/sn');
 const generic = require('./formats/generic');
 
-// Le passeport est vérifié en premier : sa MRZ et son libellé "PASSEPORT" sont plus
-// spécifiques qu'une simple mention de pays qui peut aussi apparaître sur une CNI.
-const FORMATS = [passeport, sn, generic];
+// Ordre important : le passeport (MRZ/libellé "PASSEPORT") et la carte consulaire
+// (libellé "AMBASSADE"/"CONSULAIRE") sont vérifiés avant le format Sénégal, car ce
+// dernier se déclenche sur le simple mot "SENEGAL" — présent aussi sur les cartes
+// consulaires étrangères émises par une ambassade basée à Dakar.
+const FORMATS = [passeport, consulaire, sn, generic];
 
 const extraireInfosDepuisVeryfi = (data) => {
   const ocrText = data.ocr_text || '';
