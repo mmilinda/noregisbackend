@@ -35,7 +35,18 @@ const extract = (ocrText, lignes) => {
   infos.prenom = extraireValeurParmiLabels(['Prénom', 'Given Name', 'First Name', 'Prénom usuel'], lignes) ||
                  (mrz && mrz.prenom) || null;
 
-  infos.lieuNaissance = extraireValeurParmiLabels(['Lieu de naissance', 'Né(e) à', 'Place of Birth'], lignes);
+  infos.lieuNaissance = extraireValeurParmiLabels(
+    ['Lieu de naissance', 'Né(e) à', 'Place of Birth', 'Lieu naissance'],
+    lignes
+  );
+
+  // "Autorité"/"Lieu de délivrance" (Authority/Place of Issue sur la page ICAO 9303) —
+  // pas d'équivalent dédié dans le modèle, on réutilise centreEnregistrement (même rôle
+  // que sur une CNI : l'organisme/lieu qui a émis le document).
+  infos.centreEnregistrement = extraireValeurParmiLabels(
+    ['Autorité', 'Authority', 'Lieu de délivrance', "Lieu d'émission", 'Place of Issue', 'Autorité de délivrance'],
+    lignes
+  );
 
   const dateNaissanceTexte = extraireValeurParmiLabels(['Date de naissance', 'Né(e) le', 'Date of Birth'], lignes);
   infos.dateNaissance = extraireDateDDMMYYYY(dateNaissanceTexte) || (mrz && mrz.dateNaissance) || null;
@@ -52,6 +63,7 @@ const extract = (ocrText, lignes) => {
   infos.nom = nettoyer(infos.nom);
   infos.prenom = nettoyer(infos.prenom);
   infos.lieuNaissance = nettoyer(infos.lieuNaissance);
+  infos.centreEnregistrement = nettoyer(infos.centreEnregistrement);
 
   return mrz && mrz.nationalite ? { ...infos, nationalite: mrz.nationalite } : infos;
 };

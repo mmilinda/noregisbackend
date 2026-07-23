@@ -17,8 +17,12 @@ const construireRegexLabel = (label) => {
   const apostropheInsensible = (s) => s.replace(/'/g, "['`’‘]");
 
   const base = apostropheInsensible(accentInsensible(echapper(label)));
+  // Beaucoup de passeports (ICAO 9303) impriment le label en bilingue sur une seule ligne,
+  // ex: "Nom / Surname", "Lieu de naissance / Place of Birth". Sans ça, "Surname" serait
+  // pris à tort pour la valeur au lieu d'aller lire la ligne suivante (la vraie donnée).
+  const traductionBilingue = '(?:\\s*\\/\\s*[A-Za-zÀ-ÿ()]+(?:\\s+[A-Za-zÀ-ÿ()]+){0,4})?';
   // Tolère un "s" de pluriel, avec ou sans parenthèses, avec ou sans espace avant, puis ":" optionnel
-  return new RegExp('^' + base + '\\s*\\(?\\s*s?\\s*\\)?\\s*:?\\s*', 'i');
+  return new RegExp('^' + base + '\\s*\\(?\\s*s?\\s*\\)?' + traductionBilingue + '\\s*:?\\s*', 'i');
 };
 
 const extraireValeurApresLabel = (label, lignes) => {
