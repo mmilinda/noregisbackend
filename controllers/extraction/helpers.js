@@ -12,7 +12,11 @@ const construireRegexLabel = (label) => {
     .replace(/[îï]/gi, '[îïi]')
     .replace(/[ç]/gi, '[çc]');
 
-  const base = accentInsensible(echapper(label));
+  // Tolère les différentes apostrophes que l'OCR peut produire (droite ', typographique
+  // ', accent grave `) pour les labels du type "Date d'établissement".
+  const apostropheInsensible = (s) => s.replace(/'/g, "['`’‘]");
+
+  const base = apostropheInsensible(accentInsensible(echapper(label)));
   // Tolère un "s" de pluriel, avec ou sans parenthèses, avec ou sans espace avant, puis ":" optionnel
   return new RegExp('^' + base + '\\s*\\(?\\s*s?\\s*\\)?\\s*:?\\s*', 'i');
 };
