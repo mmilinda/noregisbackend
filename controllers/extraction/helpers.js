@@ -17,12 +17,19 @@ const construireRegexLabel = (label) => {
   const apostropheInsensible = (s) => s.replace(/'/g, "['`’‘]");
 
   const base = apostropheInsensible(accentInsensible(echapper(label)));
+  // Frontière de mot : la lettre suivant le label ne doit pas être une autre lettre.
+  // Sans ça, un label comme "Nom" matcherait à tort le début du mot espagnol "Nombres"
+  // (label d'une tout autre ligne/langue) au lieu de le rejeter.
+  const frontiereDeMot = '(?![A-Za-zÀ-ÿ])';
   // Beaucoup de passeports (ICAO 9303) impriment le label en bilingue sur une seule ligne,
   // ex: "Nom / Surname", "Lieu de naissance / Place of Birth". Sans ça, "Surname" serait
   // pris à tort pour la valeur au lieu d'aller lire la ligne suivante (la vraie donnée).
   const traductionBilingue = '(?:\\s*\\/\\s*[A-Za-zÀ-ÿ()]+(?:\\s+[A-Za-zÀ-ÿ()]+){0,4})?';
   // Tolère un "s" de pluriel, avec ou sans parenthèses, avec ou sans espace avant, puis ":" optionnel
-  return new RegExp('^' + base + '\\s*\\(?\\s*s?\\s*\\)?' + traductionBilingue + '\\s*:?\\s*', 'i');
+  return new RegExp(
+    '^' + base + '\\s*\\(?\\s*s?\\s*\\)?' + frontiereDeMot + traductionBilingue + '\\s*:?\\s*',
+    'i'
+  );
 };
 
 const extraireValeurApresLabel = (label, lignes) => {

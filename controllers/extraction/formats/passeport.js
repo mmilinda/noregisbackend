@@ -1,8 +1,10 @@
-// Passeport (biométrique ou non), toutes nationalités.
+// Passeport (biométrique ou non), toutes nationalités, tous continents.
 // Deux sources d'information, dans l'ordre de fiabilité :
 //   1. La Zone de Lecture Automatique (MRZ, norme ICAO 9303) — standardisée mondialement,
-//      indépendante de la langue et de la mise en page du passeport.
-//   2. Les libellés imprimés (français/anglais, bilingues sur la plupart des passeports CEDEAO).
+//      indépendante de la langue et de la mise en page du passeport. Fonctionne pour
+//      n'importe quel pays émetteur, y compris ceux dont on ne reconnaît pas les libellés.
+//   2. Les libellés imprimés, en couvrant les langues les plus courantes sur les pages
+//      biographiques mondiales : français, anglais, espagnol, portugais, allemand, italien.
 const {
   extraireValeurParmiLabels,
   extraireDateDDMMYYYY,
@@ -25,18 +27,32 @@ const extract = (ocrText, lignes) => {
   const mrz = analyserMRZ(ocrText);
 
   infos.numeroPiece = extraireValeurParmiLabels(
-    ['Passeport No', 'N° du Passeport', 'No du Passeport', 'N° Passeport', 'Passport No', 'Document No'],
+    [
+      'Passeport No', 'N° du Passeport', 'No du Passeport', 'N° Passeport', 'Passport No', 'Document No',
+      'N° de Pasaporte', 'Número de Pasaporte', 'Número do Passaporte', 'Reisepass Nr', 'Passnummer',
+      'Numero di Passaporto', 'N° del Passaporto',
+    ],
     lignes
   ) || (mrz && mrz.numeroPiece) || null;
 
-  infos.nom = extraireValeurParmiLabels(['Nom', 'Surname', 'Nom de famille'], lignes) ||
-              (mrz && mrz.nom) || null;
+  infos.nom = extraireValeurParmiLabels(
+    ['Nom', 'Surname', 'Nom de famille', 'Apellido', 'Apellidos', 'Sobrenome', 'Nachname', 'Cognome'],
+    lignes
+  ) || (mrz && mrz.nom) || null;
 
-  infos.prenom = extraireValeurParmiLabels(['Prénom', 'Given Name', 'First Name', 'Prénom usuel'], lignes) ||
-                 (mrz && mrz.prenom) || null;
+  infos.prenom = extraireValeurParmiLabels(
+    [
+      'Prénom', 'Given Name', 'First Name', 'Prénom usuel', 'Nombre', 'Nombres',
+      'Prenome', 'Vorname', 'Nome',
+    ],
+    lignes
+  ) || (mrz && mrz.prenom) || null;
 
   infos.lieuNaissance = extraireValeurParmiLabels(
-    ['Lieu de naissance', 'Né(e) à', 'Place of Birth', 'Lieu naissance'],
+    [
+      'Lieu de naissance', 'Né(e) à', 'Place of Birth', 'Lieu naissance',
+      'Lugar de Nacimiento', 'Local de Nascimento', 'Geburtsort', 'Luogo di Nascita',
+    ],
     lignes
   );
 
@@ -44,20 +60,44 @@ const extract = (ocrText, lignes) => {
   // pas d'équivalent dédié dans le modèle, on réutilise centreEnregistrement (même rôle
   // que sur une CNI : l'organisme/lieu qui a émis le document).
   infos.centreEnregistrement = extraireValeurParmiLabels(
-    ['Autorité', 'Authority', 'Lieu de délivrance', "Lieu d'émission", 'Place of Issue', 'Autorité de délivrance'],
+    [
+      'Autorité', 'Authority', 'Lieu de délivrance', "Lieu d'émission", 'Place of Issue', 'Autorité de délivrance',
+      'Autoridad', 'Autoridade', 'Behörde', 'Autorità',
+    ],
     lignes
   );
 
-  const dateNaissanceTexte = extraireValeurParmiLabels(['Date de naissance', 'Né(e) le', 'Date of Birth'], lignes);
+  const dateNaissanceTexte = extraireValeurParmiLabels(
+    [
+      'Date de naissance', 'Né(e) le', 'Date of Birth',
+      'Fecha de Nacimiento', 'Data de Nascimento', 'Geburtsdatum', 'Data di Nascita',
+    ],
+    lignes
+  );
   infos.dateNaissance = extraireDateDDMMYYYY(dateNaissanceTexte) || (mrz && mrz.dateNaissance) || null;
 
-  const dateDelivranceTexte = extraireValeurParmiLabels(["Date de délivrance", "Date d'établissement", 'Date of Issue'], lignes);
+  const dateDelivranceTexte = extraireValeurParmiLabels(
+    [
+      "Date de délivrance", "Date d'établissement", 'Date of Issue',
+      'Fecha de Expedición', 'Fecha de Emisión', 'Data de Emissão', 'Ausstellungsdatum', 'Data di Rilascio',
+    ],
+    lignes
+  );
   infos.dateDelivrance = extraireDateDDMMYYYY(dateDelivranceTexte);
 
-  const dateExpirationTexte = extraireValeurParmiLabels(["Date d'expiration", 'Date de validité', 'Date of Expiry'], lignes);
+  const dateExpirationTexte = extraireValeurParmiLabels(
+    [
+      "Date d'expiration", 'Date de validité', 'Date of Expiry',
+      'Fecha de Caducidad', 'Fecha de Vencimiento', 'Data de Validade', 'Gültig bis', 'Data di Scadenza',
+    ],
+    lignes
+  );
   infos.dateExpiration = extraireDateDDMMYYYY(dateExpirationTexte) || (mrz && mrz.dateExpiration) || null;
 
-  const sexeTexte = extraireValeurParmiLabels(['Sexe', 'Sex', 'Genre'], lignes);
+  const sexeTexte = extraireValeurParmiLabels(
+    ['Sexe', 'Sex', 'Genre', 'Sexo', 'Geschlecht', 'Sesso'],
+    lignes
+  );
   infos.sexe = (sexeTexte ? sexeTexte.trim().charAt(0).toUpperCase() : null) || (mrz && mrz.sexe) || null;
 
   infos.nom = nettoyer(infos.nom);
