@@ -89,6 +89,37 @@ const extraireDateDDMMYYYY = (texte) => {
   return `${a}-${m}-${j}`;
 };
 
+// Beaucoup de passeports CEDEAO impriment les dates en mois abrégé bilingue sur la même
+// ligne, ex: "18 OCT/OCT 1994", "26 SEPT/SEP 2024" (jour, mois FR/EN séparés par "/", année).
+const MOIS_ABREGES = {
+  JAN: '01', JANV: '01',
+  FEV: '02', FEVR: '02', FEB: '02',
+  MAR: '03', MARS: '03',
+  AVR: '04', APR: '04',
+  MAI: '05', MAY: '05',
+  JUN: '06', JUIN: '06',
+  JUL: '07', JUIL: '07',
+  AOU: '08', AOUT: '08', AUG: '08',
+  SEP: '09', SEPT: '09',
+  OCT: '10',
+  NOV: '11',
+  DEC: '12',
+};
+
+// Renvoie toutes les dates "JJ MOIS/MOIS AAAA" trouvées dans le texte, dans leur ordre
+// d'apparition (convention habituelle sur ces passeports : naissance, délivrance, expiration).
+const extraireDatesMoisAbrege = (texte) => {
+  if (!texte) return [];
+  const regex = /(\d{1,2})\s+([A-Za-zÀ-ÿ]{3,5})\s*\/\s*[A-Za-zÀ-ÿ]{3,5}\s+(\d{4})/g;
+  const dates = [];
+  let m;
+  while ((m = regex.exec(texte)) !== null) {
+    const mois = MOIS_ABREGES[m[2].toUpperCase()];
+    if (mois) dates.push(`${m[3]}-${mois}-${m[1].padStart(2, '0')}`);
+  }
+  return dates;
+};
+
 const nettoyer = (str) => str ? str.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').replace(/\s+/g, ' ').trim() : null;
 
 const infosVides = () => ({
@@ -138,6 +169,7 @@ module.exports = {
   extraireValeurApresLabel,
   extraireValeurParmiLabels,
   extraireDateDDMMYYYY,
+  extraireDatesMoisAbrege,
   nettoyer,
   infosVides,
   analyserMRZ,

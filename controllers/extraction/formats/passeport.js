@@ -8,6 +8,7 @@
 const {
   extraireValeurParmiLabels,
   extraireDateDDMMYYYY,
+  extraireDatesMoisAbrege,
   nettoyer,
   infosVides,
   analyserMRZ,
@@ -20,33 +21,57 @@ const detect = (ocrText) => {
   return !!analyserMRZ(ocrText);
 };
 
+// Sur certains passeports, "Sexe", "Lieu de naissance" et "Autorité" (émettrice) sont
+// imprimés en colonnes sur une seule ligne de valeurs ("M   KEUR MADIABEL   MINT/DGPN/DPETV"),
+// avec un en-tête au-dessus trop dégradé par l'OCR pour être reconnu par libellé.
+const extraireTrioSexeLieuAutorite = (ocrText) => {
+  const match = ocrText.match(/\b([MF])\t([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\- ]*?)\t([A-Z0-9\/.\-]{3,})/);
+  if (!match) return null;
+  return { sexe: match[1], lieuNaissance: match[2].trim(), autorite: match[3].trim() };
+};
+
+// Repli quand libellé et MRZ échouent tous les deux (ligne 1 de la MRZ tronquée par l'OCR,
+// libellé du numéro trop dégradé) : le numéro de passeport reste souvent lisible tel quel
+// dans le texte brut (ex: "A03863136").
+const extraireNumeroPasseport = (ocrText) => {
+  const match = ocrText.match(/\b([A-Z]{1,2}\d{6,9})\b/);
+  return match ? match[1] : null;
+};
+
 const extract = (ocrText, lignes) => {
   const infos = infosVides();
   infos.typePiece = 'PASSEPORT';
 
   const mrz = analyserMRZ(ocrText);
+  const trio = extraireTrioSexeLieuAutorite(ocrText);
+  const datesAbregees = extraireDatesMoisAbrege(ocrText);
 
-  infos.numeroPiece = extraireValeurParmiLabels(
+  // La MRZ (norme ICAO 9303) est standardisée et bien plus fiable qu'un libellé imprimé
+  // dégradé par l'OCR : quand elle est présente, on la préfère pour les champs qu'elle
+  // encode, et on ne se rabat sur le libellé que si elle est absente. Sans ça, un libellé
+  // mal reconnu (ex: "Prénom Oven Names" sans le "/" attendu) peut voler la valeur d'un
+  // champ à la place d'une MRZ pourtant correcte.
+  infos.numeroPiece = (mrz && mrz.numeroPiece) || extraireValeurParmiLabels(
     [
       'Passeport No', 'N° du Passeport', 'No du Passeport', 'N° Passeport', 'Passport No', 'Document No',
       'N° de Pasaporte', 'Número de Pasaporte', 'Número do Passaporte', 'Reisepass Nr', 'Passnummer',
       'Numero di Passaporto', 'N° del Passaporto',
     ],
     lignes
-  ) || (mrz && mrz.numeroPiece) || null;
+  ) || extraireNumeroPasseport(ocrText) || null;
 
-  infos.nom = extraireValeurParmiLabels(
+  infos.nom = (mrz && mrz.nom) || extraireValeurParmiLabels(
     ['Nom', 'Surname', 'Nom de famille', 'Apellido', 'Apellidos', 'Sobrenome', 'Nachname', 'Cognome'],
     lignes
-  ) || (mrz && mrz.nom) || null;
+  ) || null;
 
-  infos.prenom = extraireValeurParmiLabels(
+  infos.prenom = (mrz && mrz.prenom) || extraireValeurParmiLabels(
     [
       'Prénom', 'Given Name', 'First Name', 'Prénom usuel', 'Nombre', 'Nombres',
       'Prenome', 'Vorname', 'Nome',
     ],
     lignes
-  ) || (mrz && mrz.prenom) || null;
+  ) || null;
 
   infos.lieuNaissance = extraireValeurParmiLabels(
     [
@@ -54,7 +79,7 @@ const extract = (ocrText, lignes) => {
       'Lugar de Nacimiento', 'Local de Nascimento', 'Geburtsort', 'Luogo di Nascita',
     ],
     lignes
-  );
+  ) || (trio && trio.lieuNaissance) || null;
 
   // "Autorité"/"Lieu de délivrance" (Authority/Place of Issue sur la page ICAO 9303) —
   // pas d'équivalent dédié dans le modèle, on réutilise centreEnregistrement (même rôle
@@ -65,7 +90,7 @@ const extract = (ocrText, lignes) => {
       'Autoridad', 'Autoridade', 'Behörde', 'Autorità',
     ],
     lignes
-  );
+  ) || (trio && trio.autorite) || null;
 
   const dateNaissanceTexte = extraireValeurParmiLabels(
     [
@@ -74,7 +99,7 @@ const extract = (ocrText, lignes) => {
     ],
     lignes
   );
-  infos.dateNaissance = extraireDateDDMMYYYY(dateNaissanceTexte) || (mrz && mrz.dateNaissance) || null;
+  infos.dateNaissance = (mrz && mrz.dateNaissance) || extraireDateDDMMYYYY(dateNaissanceTexte) || null;
 
   const dateDelivranceTexte = extraireValeurParmiLabels(
     [
@@ -92,18 +117,34 @@ const extract = (ocrText, lignes) => {
     ],
     lignes
   );
-  infos.dateExpiration = extraireDateDDMMYYYY(dateExpirationTexte) || (mrz && mrz.dateExpiration) || null;
+  infos.dateExpiration = (mrz && mrz.dateExpiration) || extraireDateDDMMYYYY(dateExpirationTexte) || null;
+
+  // Repli quand les libellés sont trop dégradés par l'OCR pour être reconnus : les dates au
+  // format "JJ MOIS/MOIS AAAA" apparaissent dans l'ordre naissance, délivrance, expiration.
+  if (datesAbregees.length >= 3) {
+    if (!infos.dateNaissance) infos.dateNaissance = datesAbregees[0];
+    if (!infos.dateDelivrance) infos.dateDelivrance = datesAbregees[1];
+    if (!infos.dateExpiration) infos.dateExpiration = datesAbregees[2];
+  } else if (datesAbregees.length === 2 && !infos.dateDelivrance && !infos.dateExpiration) {
+    infos.dateDelivrance = datesAbregees[0];
+    infos.dateExpiration = datesAbregees[1];
+  } else if (datesAbregees.length === 1 && !infos.dateNaissance) {
+    infos.dateNaissance = datesAbregees[0];
+  }
 
   const sexeTexte = extraireValeurParmiLabels(
     ['Sexe', 'Sex', 'Genre', 'Sexo', 'Geschlecht', 'Sesso'],
     lignes
   );
-  infos.sexe = (sexeTexte ? sexeTexte.trim().charAt(0).toUpperCase() : null) || (mrz && mrz.sexe) || null;
+  infos.sexe = (mrz && mrz.sexe) ||
+               (sexeTexte ? sexeTexte.trim().charAt(0).toUpperCase() : null) ||
+               (trio && trio.sexe) || null;
 
   infos.nom = nettoyer(infos.nom);
   infos.prenom = nettoyer(infos.prenom);
   infos.lieuNaissance = nettoyer(infos.lieuNaissance);
-  infos.centreEnregistrement = nettoyer(infos.centreEnregistrement);
+  // Pas de nettoyer() ici : l'autorité émettrice est parfois un code alphanumérique
+  // ponctué ("MINT/DGPN/DPETV") dont la ponctuation fait partie du sens.
 
   return mrz && mrz.nationalite ? { ...infos, nationalite: mrz.nationalite } : infos;
 };
