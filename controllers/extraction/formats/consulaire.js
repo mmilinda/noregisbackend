@@ -13,12 +13,20 @@ const {
 } = require('../helpers');
 
 const detect = (ocrText) => {
-  const upper = ocrText.toUpperCase();
+  // toUpperCase() garde les accents ("République" -> "RÉPUBLIQUE") : on les retire pour
+  // pouvoir comparer avec des constantes non accentuées.
+  const upper = ocrText.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
   return upper.includes('CARTE D\'IDENTITE CONSULAIRE') ||
          upper.includes('CARTE D IDENTITE CONSULAIRE') ||
          upper.includes('AMBASSADE DU') ||
          upper.includes('AMBASSADE DE') ||
-         upper.includes('CONSULAIRE');
+         upper.includes('CONSULAIRE') ||
+         // Le verso de ces cartes (dates de délivrance/expiration, signature) ne répète pas
+         // toujours "AMBASSADE"/"CONSULAIRE" : on le reconnaît via ses propres mentions.
+         upper.includes("SIGNATURE DE L'AUTORITE") ||
+         upper.includes('SIGNATURE DE L AUTORITE') ||
+         upper.includes('REPUBLIQUE DU CONGO') ||
+         upper.includes('REPUBLIQUE GABONAISE');
 };
 
 // Code alphanumérique du type "AMIGA0017/25-SGL" ou "SN0326160", souvent imprimé
@@ -37,6 +45,16 @@ const extraireTrioSexeDateLieu = (ocrText) => {
   const match = ocrText.match(/\b([MF])[\t ]+(\d{2}\/\d{2}\/\d{4})[\t ]+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\- ]*)/);
   if (!match) return null;
   return { sexe: match[1], dateNaissance: match[2], lieuNaissance: match[3].trim() };
+};
+
+// Sur le verso, "Date de délivrance" et "Date d'expiration" sont souvent imprimées sur la
+// même ligne, et l'OCR massacre régulièrement les deux libellés au point de ne plus les
+// reconnaître (ex: "Date de delerance ... Dated expiration ..."). On ne se fie donc pas au
+// libellé ici : la première date rencontrée est la délivrance, la seconde l'expiration.
+const extraireDeuxDates = (ocrText) => {
+  const match = ocrText.match(/(\d{2}\/\d{2}\/\d{4})[^\d\n]{0,40}(\d{2}\/\d{2}\/\d{4})/);
+  if (!match) return null;
+  return { dateDelivrance: match[1], dateExpiration: match[2] };
 };
 
 const extract = (ocrText, lignes) => {
@@ -59,15 +77,19 @@ const extract = (ocrText, lignes) => {
   infos.lieuNaissance = extraireValeurApresLabel('Lieu de naissance', lignes) || (trio && trio.lieuNaissance) || null;
   infos.adresseDomicile = extraireValeurApresLabel('Adresse', lignes);
 
+  const deuxDates = extraireDeuxDates(ocrText);
+
   const dateDelivranceTexte = extraireValeurParmiLabels(
     ['Date de délivrance', "Date d'établissement"], lignes
   );
-  infos.dateDelivrance = extraireDateDDMMYYYY(dateDelivranceTexte);
+  infos.dateDelivrance = extraireDateDDMMYYYY(dateDelivranceTexte) ||
+                         (deuxDates && extraireDateDDMMYYYY(deuxDates.dateDelivrance)) || null;
 
   const dateExpirationTexte = extraireValeurParmiLabels(
     ["Date d'expiration", 'Expire le', 'Date de validité'], lignes
   );
-  infos.dateExpiration = extraireDateDDMMYYYY(dateExpirationTexte);
+  infos.dateExpiration = extraireDateDDMMYYYY(dateExpirationTexte) ||
+                         (deuxDates && extraireDateDDMMYYYY(deuxDates.dateExpiration)) || null;
 
   infos.numeroPiece = extraireValeurParmiLabels(['N°', 'Numéro', 'N° Carte'], lignes) ||
                        extraireCodeAlphanumerique(ocrText);
