@@ -32,16 +32,37 @@ const construireRegexLabel = (label) => {
   );
 };
 
+// Devises/mentions nationales imprimées en filigrane sur beaucoup de cartes consulaires
+// ("Unité - Travail - Progrès" au Congo, "Union - Travail - Justice" au Gabon...) que l'OCR
+// capte parfois à la place de la vraie valeur d'un champ. Comparaison par préfixe pour
+// tolérer les erreurs OCR courantes (ex: "PROGSE"/"UNITS" au lieu de "PROGRES"/"UNITE").
+const PREFIXES_BRUIT_DE_FOND = [
+  'UNIT', 'TRAVA', 'PROGR', 'PROGS', 'FRATERN', 'JUSTIC', 'DISCIPL', 'REPUBLIQU', 'REPUBLIC',
+];
+
+const estBruitDeFond = (ligne) => {
+  const mot = ligne.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+  // Pas de lettres du tout (date, numéro...) : ce n'est pas un mot de devise nationale, donc pas du bruit.
+  if (!mot) return false;
+  return PREFIXES_BRUIT_DE_FOND.some(p => mot.startsWith(p));
+};
+
 const extraireValeurApresLabel = (label, lignes) => {
   const regex = construireRegexLabel(label);
   for (let i = 0; i < lignes.length; i++) {
     const ligne = lignes[i];
     const match = ligne.match(regex);
-    if (match) {
-      let valeur = ligne.slice(match[0].length).trim();
-      if (valeur) return valeur;
-      if (i + 1 < lignes.length) return lignes[i + 1].trim();
-    }
+    if (!match) continue;
+
+    // Une tabulation juste après le label indique une colonne voisine (bruit de fond
+    // imprimé sur la carte), pas la valeur du champ : on ignore le reste de la ligne.
+    const suiviDuneTabulation = match[0].includes('\t');
+    const valeurMemeLigne = suiviDuneTabulation ? '' : ligne.slice(match[0].length).split('\t')[0].trim();
+    if (valeurMemeLigne && !estBruitDeFond(valeurMemeLigne)) return valeurMemeLigne;
+
+    let j = i + 1;
+    while (j < lignes.length && estBruitDeFond(lignes[j].split('\t')[0])) j++;
+    if (j < lignes.length) return lignes[j].split('\t')[0].trim();
   }
   return null;
 };

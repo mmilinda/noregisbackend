@@ -28,6 +28,17 @@ const extraireCodeAlphanumerique = (ocrText) => {
   return match ? match[1] : null;
 };
 
+// Sur certaines cartes (ex: Congo), "Sexe", "Date de naissance" et "Lieu de naissance"
+// sont imprimés en colonnes : un en-tête sur une ligne, puis les trois valeurs collées sur
+// la ligne suivante ("M   01/04/1998 Pointe-Noire"). Le matching par label seul échoue ici
+// (le libellé "Sexe" attrape alors le reste de l'en-tête comme si c'était sa valeur), donc
+// on cherche ce triplet directement dans le texte brut.
+const extraireTrioSexeDateLieu = (ocrText) => {
+  const match = ocrText.match(/\b([MF])[\t ]+(\d{2}\/\d{2}\/\d{4})[\t ]+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\- ]*)/);
+  if (!match) return null;
+  return { sexe: match[1], dateNaissance: match[2], lieuNaissance: match[3].trim() };
+};
+
 const extract = (ocrText, lignes) => {
   const infos = infosVides();
   infos.typePiece = 'CARTE_CONSULAIRE';
@@ -35,13 +46,17 @@ const extract = (ocrText, lignes) => {
   infos.nom = extraireValeurApresLabel('Nom', lignes);
   infos.prenom = extraireValeurApresLabel('Prénom', lignes);
 
+  const trio = extraireTrioSexeDateLieu(ocrText);
+
   const sexeTexte = extraireValeurApresLabel('Sexe', lignes);
-  infos.sexe = sexeTexte ? sexeTexte.trim().charAt(0).toUpperCase() : null;
+  infos.sexe = (sexeTexte && sexeTexte.trim().length <= 2 ? sexeTexte.trim().charAt(0).toUpperCase() : null) ||
+               (trio && trio.sexe) || null;
 
   const dateNaissanceTexte = extraireValeurParmiLabels(['Date de naissance', 'Né(e) le'], lignes);
-  infos.dateNaissance = extraireDateDDMMYYYY(dateNaissanceTexte);
+  infos.dateNaissance = extraireDateDDMMYYYY(dateNaissanceTexte) ||
+                        (trio && extraireDateDDMMYYYY(trio.dateNaissance)) || null;
 
-  infos.lieuNaissance = extraireValeurApresLabel('Lieu de naissance', lignes);
+  infos.lieuNaissance = extraireValeurApresLabel('Lieu de naissance', lignes) || (trio && trio.lieuNaissance) || null;
   infos.adresseDomicile = extraireValeurApresLabel('Adresse', lignes);
 
   const dateDelivranceTexte = extraireValeurParmiLabels(
@@ -56,6 +71,13 @@ const extract = (ocrText, lignes) => {
 
   infos.numeroPiece = extraireValeurParmiLabels(['N°', 'Numéro', 'N° Carte'], lignes) ||
                        extraireCodeAlphanumerique(ocrText);
+
+  // Repli : certaines cartes impriment le numéro sur sa propre ligne, sans libellé ni
+  // lettre reconnaissable par l'OCR (ex: "SN0326160" lu comme "26160" seul sur sa ligne).
+  if (!infos.numeroPiece) {
+    const derniereLigne = lignes[lignes.length - 1];
+    if (derniereLigne && /^\d{4,}$/.test(derniereLigne)) infos.numeroPiece = derniereLigne;
+  }
 
   const profession = extraireValeurApresLabel('Profession', lignes);
 
