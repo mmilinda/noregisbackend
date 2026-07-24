@@ -25,9 +25,12 @@ const construireRegexLabel = (label) => {
   // ex: "Nom / Surname", "Lieu de naissance / Place of Birth". Sans ça, "Surname" serait
   // pris à tort pour la valeur au lieu d'aller lire la ligne suivante (la vraie donnée).
   const traductionBilingue = '(?:\\s*\\/\\s*[A-Za-zÀ-ÿ()]+(?:\\s+[A-Za-zÀ-ÿ()]+){0,4})?';
+  // Parasites OCR fréquents en début de ligne (puces, guillemets égarés, symboles) avant le
+  // vrai libellé, ex: '⚫ "Lieu de Naissance Libreville'. On les ignore.
+  const parasitesDebutLigne = '[^A-Za-zÀ-ÿ]*';
   // Tolère un "s" de pluriel, avec ou sans parenthèses, avec ou sans espace avant, puis ":" optionnel
   return new RegExp(
-    '^' + base + '\\s*\\(?\\s*s?\\s*\\)?' + frontiereDeMot + traductionBilingue + '\\s*:?\\s*',
+    '^' + parasitesDebutLigne + base + '\\s*\\(?\\s*s?\\s*\\)?' + frontiereDeMot + traductionBilingue + '\\s*:?\\s*',
     'i'
   );
 };

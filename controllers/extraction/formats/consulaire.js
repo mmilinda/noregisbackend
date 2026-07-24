@@ -91,7 +91,7 @@ const extract = (ocrText, lignes) => {
   infos.dateExpiration = extraireDateDDMMYYYY(dateExpirationTexte) ||
                          (deuxDates && extraireDateDDMMYYYY(deuxDates.dateExpiration)) || null;
 
-  infos.numeroPiece = extraireValeurParmiLabels(['N°', 'Numéro', 'N° Carte'], lignes) ||
+  infos.numeroPiece = extraireValeurParmiLabels(['N°', 'No', 'Numéro', 'N° Carte'], lignes) ||
                        extraireCodeAlphanumerique(ocrText);
 
   // Repli : certaines cartes impriment le numéro sur sa propre ligne, sans libellé ni
