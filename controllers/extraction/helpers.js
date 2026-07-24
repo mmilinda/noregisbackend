@@ -50,6 +50,25 @@ const estBruitDeFond = (ligne) => {
   return PREFIXES_BRUIT_DE_FOND.some(p => mot.startsWith(p));
 };
 
+// Vocabulaire anglais des libellés ICAO 9303 courants. Quand le "/" bilingue attendu
+// ("Nom / Surname") est avalé par l'OCR, il ne reste que "Nom Surname" : le label matche
+// "Nom" et le reste de la ligne ("Surname") ressemble à s'y méprendre à une vraie valeur.
+// Si TOUS les mots du reste de ligne appartiennent à ce vocabulaire, on sait qu'il s'agit
+// de la traduction du libellé, pas de la donnée — qui est alors sur la ligne suivante.
+const VOCABULAIRE_LIBELLE_ANGLAIS = new Set([
+  'NAME', 'NAMES', 'SURNAME', 'GIVEN', 'FIRST', 'NATIONALITY', 'NATIONAL', 'BIRTH', 'SEX',
+  'DATE', 'ISSUE', 'EXPIRY', 'EXPIRATION', 'AUTHORITY', 'SIGNATURE', 'CODE', 'COUNTRY',
+  'TYPE', 'PERSONAL', 'NUMBER', 'PLACE', 'OF', 'NO',
+]);
+
+const estTraductionResiduelle = (valeur) => {
+  const mots = valeur.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().split(/\s+/)
+    .map(m => m.replace(/[^A-Z]/g, ''))
+    .filter(Boolean);
+  if (mots.length === 0) return false;
+  return mots.every(m => VOCABULAIRE_LIBELLE_ANGLAIS.has(m));
+};
+
 const extraireValeurApresLabel = (label, lignes) => {
   const regex = construireRegexLabel(label);
   for (let i = 0; i < lignes.length; i++) {
@@ -61,7 +80,9 @@ const extraireValeurApresLabel = (label, lignes) => {
     // imprimé sur la carte), pas la valeur du champ : on ignore le reste de la ligne.
     const suiviDuneTabulation = match[0].includes('\t');
     const valeurMemeLigne = suiviDuneTabulation ? '' : ligne.slice(match[0].length).split('\t')[0].trim();
-    if (valeurMemeLigne && !estBruitDeFond(valeurMemeLigne)) return valeurMemeLigne;
+    if (valeurMemeLigne && !estBruitDeFond(valeurMemeLigne) && !estTraductionResiduelle(valeurMemeLigne)) {
+      return valeurMemeLigne;
+    }
 
     let j = i + 1;
     while (j < lignes.length && estBruitDeFond(lignes[j].split('\t')[0])) j++;
