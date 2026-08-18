@@ -2,7 +2,7 @@ const { Document } = require('../models');
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
-const { extraireInfosDepuisVeryfi } = require('./extraction');
+const { extraireInfosDepuisVeryfi, extraireInfosAvecOpenAI } = require('./extraction');
 
 const VERYFI_CLIENT_ID     = process.env.VERYFI_CLIENT_ID;
 const VERYFI_CLIENT_SECRET = process.env.VERYFI_CLIENT_SECRET;
@@ -22,32 +22,62 @@ const scannerImage = async (req, res) => {
       tailleFichier: req.file.size,
     });
 
-    const form = new FormData();
-    form.append('file', fs.createReadStream(cheminFichier));
-    const response = await axios.post(VERYFI_API_URL, form, {
-      headers: {
-        ...form.getHeaders(),
-        'CLIENT-ID': VERYFI_CLIENT_ID,
-        'AUTHORIZATION': `apikey ${VERYFI_USERNAME}:${VERYFI_API_KEY}`,
-      },
-    });
+    let infosExtraites = null;
+    let modeExtraction = 'OPENAI_VISION';
+    let texteRaw = '';
 
-    const data = response.data;
-    console.log('✅ Veryfi response:', data);
-    const infosExtraites = extraireInfosDepuisVeryfi(data);
+    // 1. Priorité à OpenAI Vision
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        console.log('🤖 Extraction des données via OpenAI Vision...');
+        infosExtraites = await extraireInfosAvecOpenAI(cheminFichier);
+        console.log('✅ Extraction OpenAI Vision réussie :', infosExtraites);
+      } catch (openaiErr) {
+        console.error('⚠️ Échec de l\'extraction OpenAI Vision, tentative via Veryfi :', openaiErr.message);
+      }
+    }
+
+    // 2. Repli sur Veryfi si OpenAI n'a pas produit de résultat
+    if (!infosExtraites && VERYFI_API_KEY && VERYFI_USERNAME) {
+      try {
+        console.log('📡 Extraction via Veryfi...');
+        const form = new FormData();
+        form.append('file', fs.createReadStream(cheminFichier));
+        const response = await axios.post(VERYFI_API_URL, form, {
+          headers: {
+            ...form.getHeaders(),
+            'CLIENT-ID': VERYFI_CLIENT_ID,
+            'AUTHORIZATION': `apikey ${VERYFI_USERNAME}:${VERYFI_API_KEY}`,
+          },
+        });
+        const data = response.data;
+        infosExtraites = extraireInfosDepuisVeryfi(data);
+        modeExtraction = 'VERYFI';
+        texteRaw = data.ocr_text || '';
+      } catch (veryfiErr) {
+        console.error('❌ Erreur Veryfi :', veryfiErr.response?.data || veryfiErr.message);
+      }
+    }
+
+    if (!infosExtraites) {
+      return res.status(500).json({
+        success: false,
+        message: 'L\'extraction a échoué. Aucun service d\'OCR (OpenAI ou Veryfi) n\'a pu traiter la pièce d\'identité.',
+      });
+    }
 
     const io = req.app.get('io');
     if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
 
     return res.json({
       success: true,
-      message: 'Scan terminé via Veryfi.',
+      message: `Scan terminé avec succès via ${modeExtraction}.`,
       document: { id: document._id, nomFichier: document.nomFichier },
       infosExtraites,
-      texteRaw: data.ocr_text || '',
+      texteRaw,
     });
   } catch (err) {
-    console.error('Veryfi error:', err.response?.data || err.message);
+    console.error('Erreur globale scan :', err.message);
     return res.status(500).json({ success: false, message: err.message });
   }
 };

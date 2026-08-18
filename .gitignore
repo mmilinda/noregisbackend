@@ -1,4 +1,3 @@
-cat > .gitignore << 'EOF'
 # Variables d'environnement
 .env
 .env.local
@@ -25,4 +24,3 @@ Thumbs.db
 # Fichiers temporaires
 *.tmp
 *_processed.png
-EOF

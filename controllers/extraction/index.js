@@ -1,18 +1,10 @@
-// Point d'entrée de l'extraction d'infos depuis le texte OCR (Veryfi).
-// Détecte le format de la pièce (pays) via mots-clés, puis délègue au
-// parser correspondant. Pour ajouter un pays : créer un fichier dans
-// ./formats/<pays>.js exportant { id, label, detect(ocrText), extract(ocrText, lignes) }
-// et l'enregistrer ci-dessous, avant le fallback "generic".
-
+// Point d'entrée de l'extraction d'infos depuis le texte OCR (Veryfi / OpenAI).
 const passeport = require('./formats/passeport');
 const consulaire = require('./formats/consulaire');
 const sn = require('./formats/sn');
 const generic = require('./formats/generic');
+const { extraireInfosAvecOpenAI } = require('./openaiExtractor');
 
-// Ordre important : le passeport (MRZ/libellé "PASSEPORT") et la carte consulaire
-// (libellé "AMBASSADE"/"CONSULAIRE") sont vérifiés avant le format Sénégal, car ce
-// dernier se déclenche sur le simple mot "SENEGAL" — présent aussi sur les cartes
-// consulaires étrangères émises par une ambassade basée à Dakar.
 const FORMATS = [passeport, consulaire, sn, generic];
 
 const extraireInfosDepuisVeryfi = (data) => {
@@ -25,4 +17,7 @@ const extraireInfosDepuisVeryfi = (data) => {
   return { ...infos, formatDetecte: format.id };
 };
 
-module.exports = { extraireInfosDepuisVeryfi };
+module.exports = {
+  extraireInfosDepuisVeryfi,
+  extraireInfosAvecOpenAI,
+};
