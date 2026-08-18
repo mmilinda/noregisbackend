@@ -20,7 +20,11 @@ const getMimeType = (filePath) => {
 const extraireInfosAvecOpenAI = async (cheminFichier) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error('La clé OPENAI_API_KEY n\'est pas définie dans les variables d\'environnement.');
+    throw new Error('La clé OPENAI_API_KEY n\'est pas définie dans le fichier .env');
+  }
+
+  if (!fs.existsSync(cheminFichier)) {
+    throw new Error(`Fichier introuvable sur le serveur : ${cheminFichier}`);
   }
 
   const buffer = fs.readFileSync(cheminFichier);
@@ -82,41 +86,50 @@ Règles de formatage strictes :
     temperature: 0.1,
   };
 
-  const response = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    payload,
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      timeout: 30000,
+  try {
+    const response = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      payload,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        timeout: 30000,
+      }
+    );
+
+    const rawJson = response.data?.choices?.[0]?.message?.content;
+    if (!rawJson) {
+      throw new Error('Aucune réponse renvoyée par OpenAI Vision.');
     }
-  );
 
-  const rawJson = response.data?.choices?.[0]?.message?.content;
-  if (!rawJson) {
-    throw new Error('Aucune réponse renvoyée par OpenAI Vision.');
+    const parsedData = JSON.parse(rawJson);
+
+    return {
+      nom: parsedData.nom || null,
+      prenom: parsedData.prenom || null,
+      dateNaissance: parsedData.dateNaissance || null,
+      lieuNaissance: parsedData.lieuNaissance || null,
+      sexe: parsedData.sexe || null,
+      taille: parsedData.taille ? Number(parsedData.taille) : null,
+      numeroPiece: parsedData.numeroPiece ? String(parsedData.numeroPiece).trim() : null,
+      typePiece: parsedData.typePiece || 'CNI',
+      dateDelivrance: parsedData.dateDelivrance || null,
+      dateExpiration: parsedData.dateExpiration || null,
+      centreEnregistrement: parsedData.centreEnregistrement || null,
+      adresseDomicile: parsedData.adresseDomicile || null,
+      nationalite: parsedData.nationalite || null,
+      formatDetecte: 'OPENAI_VISION',
+    };
+  } catch (err) {
+    if (err.response) {
+      const status = err.response.status;
+      const apiErrorMsg = err.response.data?.error?.message || JSON.stringify(err.response.data);
+      throw new Error(`OpenAI API Erreur ${status}: ${apiErrorMsg}`);
+    }
+    throw err;
   }
-
-  const parsedData = JSON.parse(rawJson);
-
-  return {
-    nom: parsedData.nom || null,
-    prenom: parsedData.prenom || null,
-    dateNaissance: parsedData.dateNaissance || null,
-    lieuNaissance: parsedData.lieuNaissance || null,
-    sexe: parsedData.sexe || null,
-    taille: parsedData.taille ? Number(parsedData.taille) : null,
-    numeroPiece: parsedData.numeroPiece ? String(parsedData.numeroPiece).trim() : null,
-    typePiece: parsedData.typePiece || 'CNI',
-    dateDelivrance: parsedData.dateDelivrance || null,
-    dateExpiration: parsedData.dateExpiration || null,
-    centreEnregistrement: parsedData.centreEnregistrement || null,
-    adresseDomicile: parsedData.adresseDomicile || null,
-    nationalite: parsedData.nationalite || null,
-    formatDetecte: 'OPENAI_VISION',
-  };
 };
 
 module.exports = { extraireInfosAvecOpenAI };

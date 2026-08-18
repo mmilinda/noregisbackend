@@ -11,16 +11,27 @@ const VERYFI_API_KEY       = process.env.VERYFI_API_KEY;
 const VERYFI_API_URL       = 'https://api.veryfi.com/api/v8/partner/documents';
 
 const scannerImage = async (req, res) => {
+  let openaiErrorMessage = null;
+
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
 
     const cheminFichier = req.file.path;
-    const document = await Document.create({
-      nomFichier:    req.file.filename,
-      cheminFichier,
-      typeMime:      req.file.mimetype,
-      tailleFichier: req.file.size,
-    });
+    let document = null;
+
+    // Tentative d'enregistrement du document en BDD (non bloquant si MongoDB est déconnecté)
+    try {
+      if (Document) {
+        document = await Document.create({
+          nomFichier:    req.file.filename,
+          cheminFichier,
+          typeMime:      req.file.mimetype,
+          tailleFichier: req.file.size,
+        });
+      }
+    } catch (dbErr) {
+      console.warn('⚠️ MongoDB non disponible ou erreur Document.create (non bloquant) :', dbErr.message);
+    }
 
     let infosExtraites = null;
     let modeExtraction = 'OPENAI_VISION';
@@ -33,11 +44,12 @@ const scannerImage = async (req, res) => {
         infosExtraites = await extraireInfosAvecOpenAI(cheminFichier);
         console.log('✅ Extraction OpenAI Vision réussie :', infosExtraites);
       } catch (openaiErr) {
-        console.error('⚠️ Échec de l\'extraction OpenAI Vision, tentative via Veryfi :', openaiErr.message);
+        openaiErrorMessage = openaiErr.message;
+        console.error('⚠️ Échec de l\'extraction OpenAI Vision :', openaiErr.message);
       }
     }
 
-    // 2. Repli sur Veryfi si OpenAI n'a pas produit de résultat
+    // 2. Repli sur Veryfi si disponible
     if (!infosExtraites && VERYFI_API_KEY && VERYFI_USERNAME) {
       try {
         console.log('📡 Extraction via Veryfi...');
@@ -60,19 +72,24 @@ const scannerImage = async (req, res) => {
     }
 
     if (!infosExtraites) {
+      const detailMessage = openaiErrorMessage
+        ? `Échec de l'extraction OCR OpenAI : ${openaiErrorMessage}`
+        : 'L\'extraction a échoué. Aucun service d\'OCR (OpenAI ou Veryfi) n\'a pu traiter la pièce d\'identité.';
       return res.status(500).json({
         success: false,
-        message: 'L\'extraction a échoué. Aucun service d\'OCR (OpenAI ou Veryfi) n\'a pu traiter la pièce d\'identité.',
+        message: detailMessage,
       });
     }
 
     const io = req.app.get('io');
-    if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier: document.nomFichier });
+    if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier: req.file.filename });
 
     return res.json({
       success: true,
       message: `Scan terminé avec succès via ${modeExtraction}.`,
-      document: { id: document._id, nomFichier: document.nomFichier },
+      document: document
+        ? { id: document._id, nomFichier: document.nomFichier }
+        : { nomFichier: req.file.filename },
       infosExtraites,
       texteRaw,
     });
