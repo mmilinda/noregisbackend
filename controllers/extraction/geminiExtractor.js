@@ -11,7 +11,12 @@ const getMimeType = (filePath) => {
 };
 
 /**
- * Analyse une image de pièce d'identité avec Google Gemini Vision (gemini-1.5-flash)
+ * Liste des modèles Gemini pris en charge par ordre de préférence
+ */
+const MODES_GEMINI = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+
+/**
+ * Analyse une image de pièce d'identité avec Google Gemini Vision
  * et extrait les données sous forme d'un objet JSON structuré.
  * 
  * @param {string} cheminFichier - Chemin absolu ou relatif de l'image
@@ -28,10 +33,6 @@ const extraireInfosAvecGemini = async (cheminFichier) => {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
-    generationConfig: { responseMimeType: 'application/json' },
-  });
 
   const buffer = fs.readFileSync(cheminFichier);
   const mimeType = getMimeType(cheminFichier);
@@ -69,35 +70,47 @@ Règles de formatage strictes :
 3. Pour le typePiece, choisis la valeur exacte la plus pertinente parmi la liste proposée.
 4. Nettoie les chaînes (supprime les espaces superflus et bruits visuels).`;
 
-  try {
-    const result = await model.generateContent([promptSysteme, imagePart]);
-    const responseText = result.response.text();
+  let lastError = null;
 
-    if (!responseText) {
-      throw new Error('Aucune réponse renvoyée par Google Gemini Vision.');
+  for (const modelName of MODES_GEMINI) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: { responseMimeType: 'application/json' },
+      });
+
+      const result = await model.generateContent([promptSysteme, imagePart]);
+      const responseText = result.response.text();
+
+      if (!responseText) {
+        throw new Error(`Aucune réponse renvoyée par le modèle ${modelName}`);
+      }
+
+      const parsedData = JSON.parse(responseText);
+
+      return {
+        nom: parsedData.nom || null,
+        prenom: parsedData.prenom || null,
+        dateNaissance: parsedData.dateNaissance || null,
+        lieuNaissance: parsedData.lieuNaissance || null,
+        sexe: parsedData.sexe || null,
+        taille: parsedData.taille ? Number(parsedData.taille) : null,
+        numeroPiece: parsedData.numeroPiece ? String(parsedData.numeroPiece).trim() : null,
+        typePiece: parsedData.typePiece || 'CNI',
+        dateDelivrance: parsedData.dateDelivrance || null,
+        dateExpiration: parsedData.dateExpiration || null,
+        centreEnregistrement: parsedData.centreEnregistrement || null,
+        adresseDomicile: parsedData.adresseDomicile || null,
+        nationalite: parsedData.nationalite || null,
+        formatDetecte: 'GEMINI_VISION',
+      };
+    } catch (err) {
+      lastError = err;
+      console.warn(`⚠️ Tentative Gemini (${modelName}) échouée, essai modèle suivant...`, err.message);
     }
-
-    const parsedData = JSON.parse(responseText);
-
-    return {
-      nom: parsedData.nom || null,
-      prenom: parsedData.prenom || null,
-      dateNaissance: parsedData.dateNaissance || null,
-      lieuNaissance: parsedData.lieuNaissance || null,
-      sexe: parsedData.sexe || null,
-      taille: parsedData.taille ? Number(parsedData.taille) : null,
-      numeroPiece: parsedData.numeroPiece ? String(parsedData.numeroPiece).trim() : null,
-      typePiece: parsedData.typePiece || 'CNI',
-      dateDelivrance: parsedData.dateDelivrance || null,
-      dateExpiration: parsedData.dateExpiration || null,
-      centreEnregistrement: parsedData.centreEnregistrement || null,
-      adresseDomicile: parsedData.adresseDomicile || null,
-      nationalite: parsedData.nationalite || null,
-      formatDetecte: 'GEMINI_VISION',
-    };
-  } catch (err) {
-    throw new Error(`Google Gemini Vision Erreur: ${err.message}`);
   }
+
+  throw new Error(`Google Gemini Vision Erreur: ${lastError?.message || 'Échec de génération'}`);
 };
 
 module.exports = { extraireInfosAvecGemini };
