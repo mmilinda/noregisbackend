@@ -1,9 +1,10 @@
-// Point d'entrée de l'extraction d'infos depuis le texte OCR (Veryfi / OpenAI).
+// Point d'entrée de l'extraction d'infos depuis le texte OCR (Gemini / OpenAI / Veryfi).
 const passeport = require('./formats/passeport');
 const consulaire = require('./formats/consulaire');
 const sn = require('./formats/sn');
 const generic = require('./formats/generic');
 const { extraireInfosAvecOpenAI } = require('./openaiExtractor');
+const { extraireInfosAvecGemini } = require('./geminiExtractor');
 
 const FORMATS = [passeport, consulaire, sn, generic];
 
@@ -20,4 +21,5 @@ const extraireInfosDepuisVeryfi = (data) => {
 module.exports = {
   extraireInfosDepuisVeryfi,
   extraireInfosAvecOpenAI,
+  extraireInfosAvecGemini,
 };
