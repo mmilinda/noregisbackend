@@ -49,10 +49,9 @@ const PORT = process.env.PORT || 3000;
   try {
     await connectDB();
     server.listen(PORT, () => {
-      console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+      console.log(`🚀 Serveur démarré avec succès sur http://localhost:${PORT}`);
     });
   } catch (err) {
-    console.error('❌ Erreur démarrage :', err.message);
-    process.exit(1);
+    console.error('❌ Erreur démarrage serveur :', err.message);
   }
 })();
