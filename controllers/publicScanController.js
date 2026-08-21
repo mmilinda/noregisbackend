@@ -1,6 +1,8 @@
+const mongoose = require('mongoose');
 const Visiteur = require('../models/Visiteur');
 const Visite = require('../models/Visite');
 const Utilisateur = require('../models/Utilisateur');
+const { extraireInfosAvecGemini } = require('./extraction');
 
 const parseDate = (value) => {
   if (!value) return null;
@@ -25,15 +27,35 @@ const getVisitorPayload = (data) => ({
 
 const traiterPublicScan = async (req, res) => {
   try {
-    const { agentId, scanData = {}, image, source } = req.body;
+    let { agentId, scanData = {}, image, recto, source } = req.body;
 
     if (!agentId) {
       return res.status(400).json({ success: false, message: 'Identifiant de l\'agent manquant.' });
     }
 
+    // Validation du format d'ID MongoDB pour éviter le crash CastError (HTTP 500)
+    if (!mongoose.Types.ObjectId.isValid(agentId)) {
+      return res.status(400).json({ success: false, message: 'Identifiant de l\'agent invalide.' });
+    }
+
     const agent = await Utilisateur.findById(agentId);
     if (!agent) {
       return res.status(404).json({ success: false, message: 'Agent introuvable.' });
+    }
+
+    // Extraction automatique via Gemini Vision si les données de scan ne sont pas encore analysées
+    const imageSource = req.file?.buffer || req.files?.[0]?.buffer || req.file?.path || image || recto || req.body.base64;
+    
+    if (imageSource && (!scanData.nom || !scanData.prenom || !scanData.numeroPiece)) {
+      try {
+        console.log('🤖 Analyse d\'image automatique dans public-scan via Gemini Vision...');
+        const ocrInfos = await extraireInfosAvecGemini(imageSource);
+        if (ocrInfos) {
+          scanData = { ...ocrInfos, ...scanData };
+        }
+      } catch (ocrErr) {
+        console.warn('⚠️ OCR Gemini dans public-scan non disponible :', ocrErr.message);
+      }
     }
 
     const visitorPayload = getVisitorPayload(scanData);
@@ -42,7 +64,7 @@ const traiterPublicScan = async (req, res) => {
     if (!nom || !prenom || !numeroPiece) {
       return res.status(400).json({
         success: false,
-        message: 'Scan incomplet : nom, prénom et numéro de pièce sont requis.',
+        message: 'Scan incomplet : le nom, le prénom et le numéro de pièce sont requis.',
       });
     }
 
@@ -98,14 +120,14 @@ const traiterPublicScan = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'Scan reçu. Le gardien a été notifié.',
+      message: 'Scan reçu avec succès. Le gardien a été notifié.',
       visite,
       visiteur,
       reference: visite._id,
     });
   } catch (err) {
-    console.error('Erreur public scan:', err);
-    return res.status(500).json({ success: false, message: 'Erreur serveur lors du traitement du scan.' });
+    console.error('Erreur public scan :', err.message);
+    return res.status(500).json({ success: false, message: `Erreur serveur lors du traitement du scan : ${err.message}` });
   }
 };
 
