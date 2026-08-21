@@ -2,25 +2,35 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const uploadDir = process.env.NODE_ENV === 'production'
-  ? '/tmp/uploads'
-  : (process.env.UPLOAD_DIR || 'uploads');
+const isServerless = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
 
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+let storage;
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `scan_${unique}${path.extname(file.originalname)}`);
-  },
-});
+if (isServerless) {
+  // Sur Vercel (environnement Serverless avec système de fichier en lecture seule) : stockage en mémoire
+  storage = multer.memoryStorage();
+} else {
+  // En local : stockage sur disque dans uploads/
+  const uploadDir = process.env.UPLOAD_DIR || 'uploads';
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `scan_${unique}${path.extname(file.originalname)}`);
+    },
+  });
+}
 
 const fileFilter = (req, file, cb) => {
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-  allowed.includes(file.mimetype)
-    ? cb(null, true)
-    : cb(new Error('Format non accepté (JPEG, PNG, WebP, PDF)'));
+  if (allowed.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Format de fichier non accepté (JPEG, PNG, WebP, PDF uniquement)'));
+  }
 };
 
 const upload = multer({

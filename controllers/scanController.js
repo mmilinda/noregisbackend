@@ -5,7 +5,6 @@ const fs = require('fs');
 const path = require('path');
 const {
   extraireInfosDepuisVeryfi,
-  extraireInfosAvecOpenAI,
   extraireInfosAvecGemini,
 } = require('./extraction');
 
@@ -17,49 +16,42 @@ const VERYFI_API_URL       = 'https://api.veryfi.com/api/v8/partner/documents';
 
 const scannerImage = async (req, res) => {
   let geminiErrorMessage = null;
-  let openaiErrorMessage = null;
-  let cheminFichierTemporaire = null;
 
   try {
-    let cheminFichier = null;
-    let nomFichier = null;
+    let sourceImage = null;
+    let nomFichier = `scan_${Date.now()}.png`;
     let typeMime = 'image/jpeg';
     let tailleFichier = 0;
 
-    // 1. Récupération du fichier via multipart (req.file ou req.files)
+    // 1. Récupération du fichier depuis Multer (memoryStorage sur Vercel, diskStorage en local)
     const fichierRecu = req.file || (req.files && req.files.length > 0 ? req.files[0] : null);
 
     if (fichierRecu) {
-      cheminFichier = fichierRecu.path;
-      nomFichier = fichierRecu.filename;
-      typeMime = fichierRecu.mimetype;
-      tailleFichier = fichierRecu.size;
+      nomFichier = fichierRecu.originalname || fichierRecu.filename || nomFichier;
+      typeMime = fichierRecu.mimetype || typeMime;
+      tailleFichier = fichierRecu.size || 0;
+
+      // Si stockage en mémoire (Buffer sur Vercel)
+      if (fichierRecu.buffer) {
+        sourceImage = fichierRecu.buffer;
+      } else if (fichierRecu.path) {
+        sourceImage = fichierRecu.path;
+      }
     } else {
-      // 2. Repli : Récupération de l'image au format Base64 dans req.body (ex: req.body.image, req.body.recto, req.body.base64)
+      // 2. Repli : Image transmise en Base64 dans req.body (ex: req.body.image, req.body.recto, req.body.base64)
       const rawBase64 = req.body.image || req.body.recto || req.body.base64 || req.body.file;
 
       if (rawBase64 && typeof rawBase64 === 'string') {
-        const base64Clean = rawBase64.replace(/^data:image\/\w+;base64,/, '');
-        const buffer = Buffer.from(base64Clean, 'base64');
-        const uploadDir = process.env.UPLOAD_DIR || 'uploads';
-
-        if (!fs.existsSync(uploadDir)) {
-          fs.mkdirSync(uploadDir, { recursive: true });
-        }
-
+        sourceImage = rawBase64;
         nomFichier = `scan_b64_${Date.now()}.png`;
-        cheminFichier = path.join(uploadDir, nomFichier);
-        fs.writeFileSync(cheminFichier, buffer);
-        cheminFichierTemporaire = cheminFichier;
-        tailleFichier = buffer.length;
         typeMime = 'image/png';
       }
     }
 
-    if (!cheminFichier || !fs.existsSync(cheminFichier)) {
+    if (!sourceImage) {
       return res.status(400).json({
         success: false,
-        message: 'Aucune image reçue. Envoyez le fichier dans le champ "image", "recto" ou en Base64.',
+        message: 'Aucune image reçue. Transmettez le fichier dans le champ "image", "recto" ou en Base64.',
       });
     }
 
@@ -69,7 +61,7 @@ const scannerImage = async (req, res) => {
       if (Document) {
         document = await Document.create({
           nomFichier,
-          cheminFichier,
+          cheminFichier: typeof sourceImage === 'string' && fs.existsSync(sourceImage) ? sourceImage : 'virtual://buffer',
           typeMime,
           tailleFichier,
         });
@@ -80,14 +72,13 @@ const scannerImage = async (req, res) => {
 
     let infosExtraites = null;
     let modeExtraction = 'GEMINI_VISION';
-    let texteRaw = '';
 
-    // Priorité 1 : Google Gemini Vision (Gratuit, Rapide, Précis)
+    // Priorité 1 : Google Gemini Vision (Serverless Compatible)
     const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (geminiKey) {
       try {
         console.log('🤖 Extraction des données via Google Gemini Vision...');
-        infosExtraites = await extraireInfosAvecGemini(cheminFichier);
+        infosExtraites = await extraireInfosAvecGemini(sourceImage, typeMime);
         modeExtraction = 'GEMINI_VISION';
         console.log('✅ Extraction Google Gemini Vision réussie :', infosExtraites);
       } catch (geminiErr) {
@@ -95,28 +86,20 @@ const scannerImage = async (req, res) => {
         console.error('⚠️ Échec de l\'extraction Gemini Vision :', geminiErr.message);
       }
     } else {
-      console.warn('⚠️ GEMINI_API_KEY absente du process.env (Vérifiez le fichier .env et redémarrez le serveur)');
+      console.warn('⚠️ GEMINI_API_KEY absente du process.env (Vérifiez les variables d\'environnement Vercel)');
     }
 
-    // Priorité 2 : OpenAI Vision (si disponible)
-    if (!infosExtraites && process.env.OPENAI_API_KEY) {
-      try {
-        console.log('🤖 Extraction des données via OpenAI Vision...');
-        infosExtraites = await extraireInfosAvecOpenAI(cheminFichier);
-        modeExtraction = 'OPENAI_VISION';
-        console.log('✅ Extraction OpenAI Vision réussie :', infosExtraites);
-      } catch (openaiErr) {
-        openaiErrorMessage = openaiErr.message;
-        console.error('⚠️ Échec de l\'extraction OpenAI Vision :', openaiErr.message);
-      }
-    }
-
-    // Priorité 3 : Repli sur Veryfi si disponible
+    // Priorité 2 : Veryfi (si configuré)
     if (!infosExtraites && VERYFI_API_KEY && VERYFI_USERNAME) {
       try {
         console.log('📡 Extraction via Veryfi...');
         const form = new FormData();
-        form.append('file', fs.createReadStream(cheminFichier));
+        if (Buffer.isBuffer(sourceImage)) {
+          form.append('file', sourceImage, { filename: nomFichier, contentType: typeMime });
+        } else if (typeof sourceImage === 'string' && fs.existsSync(sourceImage)) {
+          form.append('file', fs.createReadStream(sourceImage));
+        }
+
         const response = await axios.post(VERYFI_API_URL, form, {
           headers: {
             ...form.getHeaders(),
@@ -127,7 +110,6 @@ const scannerImage = async (req, res) => {
         const data = response.data;
         infosExtraites = extraireInfosDepuisVeryfi(data);
         modeExtraction = 'VERYFI';
-        texteRaw = data.ocr_text || '';
       } catch (veryfiErr) {
         console.error('❌ Erreur Veryfi :', veryfiErr.response?.data || veryfiErr.message);
       }
@@ -137,8 +119,6 @@ const scannerImage = async (req, res) => {
       let detailMessage = 'L\'extraction a échoué. Aucun service d\'OCR n\'a pu traiter la pièce d\'identité.';
       if (geminiErrorMessage) {
         detailMessage = `Échec Google Gemini Vision : ${geminiErrorMessage}`;
-      } else if (openaiErrorMessage) {
-        detailMessage = `Échec OpenAI Vision : ${openaiErrorMessage}`;
       }
 
       return res.status(500).json({
@@ -157,7 +137,6 @@ const scannerImage = async (req, res) => {
         ? { id: document._id, nomFichier: document.nomFichier }
         : { nomFichier },
       infosExtraites,
-      texteRaw,
     });
   } catch (err) {
     console.error('Erreur globale scan :', err.message);

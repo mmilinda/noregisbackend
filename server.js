@@ -45,13 +45,13 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-(async () => {
-  try {
-    await connectDB();
-    server.listen(PORT, () => {
-      console.log(`🚀 Serveur démarré avec succès sur http://localhost:${PORT}`);
-    });
-  } catch (err) {
-    console.error('❌ Erreur démarrage serveur :', err.message);
-  }
-})();
+// Connexion BDD non-bloquante
+connectDB();
+
+if (!process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`🚀 Serveur démarré avec succès sur http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

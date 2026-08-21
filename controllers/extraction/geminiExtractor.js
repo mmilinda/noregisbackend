@@ -3,6 +3,7 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const getMimeType = (filePath) => {
+  if (typeof filePath !== 'string') return 'image/jpeg';
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.png') return 'image/png';
   if (ext === '.webp') return 'image/webp';
@@ -16,26 +17,42 @@ const getMimeType = (filePath) => {
 const MODES_GEMINI = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
 
 /**
- * Analyse une image de pièce d'identité avec Google Gemini Vision
- * et extrait les données sous forme d'un objet JSON structuré.
+ * Analyse une image de pièce d'identité avec Google Gemini Vision (compatible Serverless Vercel)
  * 
- * @param {string} cheminFichier - Chemin absolu ou relatif de l'image
+ * @param {string|Buffer} sourceImage - Chemin de fichier, Buffer binaire ou chaîne Base64
  * @returns {Promise<Object>} Données d'identité extraites
  */
-const extraireInfosAvecGemini = async (cheminFichier) => {
+const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) {
-    throw new Error('La clé GEMINI_API_KEY n\'est pas définie dans le fichier .env');
+    throw new Error('La clé GEMINI_API_KEY n\'est pas configurée dans les variables d\'environnement de Vercel (Settings -> Environment Variables).');
   }
 
-  if (!fs.existsSync(cheminFichier)) {
-    throw new Error(`Fichier introuvable sur le serveur : ${cheminFichier}`);
+  let buffer = null;
+  let mimeType = mimeTypeForm || 'image/jpeg';
+
+  if (Buffer.isBuffer(sourceImage)) {
+    buffer = sourceImage;
+  } else if (typeof sourceImage === 'string') {
+    if (sourceImage.startsWith('data:')) {
+      const matchMime = sourceImage.match(/^data:(image\/\w+);base64,/);
+      if (matchMime) mimeType = matchMime[1];
+      const base64Data = sourceImage.replace(/^data:image\/\w+;base64,/, '');
+      buffer = Buffer.from(base64Data, 'base64');
+    } else if (fs.existsSync(sourceImage)) {
+      buffer = fs.readFileSync(sourceImage);
+      mimeType = getMimeType(sourceImage);
+    } else {
+      // Chaîne base64 brute sans préfixe data:
+      buffer = Buffer.from(sourceImage, 'base64');
+    }
+  }
+
+  if (!buffer || buffer.length === 0) {
+    throw new Error('L\'image fournie est vide ou corrompue.');
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-
-  const buffer = fs.readFileSync(cheminFichier);
-  const mimeType = getMimeType(cheminFichier);
 
   const imagePart = {
     inlineData: {
