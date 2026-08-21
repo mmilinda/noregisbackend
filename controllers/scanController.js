@@ -2,6 +2,7 @@ const { Document } = require('../models');
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
+const path = require('path');
 const {
   extraireInfosDepuisVeryfi,
   extraireInfosAvecOpenAI,
@@ -17,21 +18,60 @@ const VERYFI_API_URL       = 'https://api.veryfi.com/api/v8/partner/documents';
 const scannerImage = async (req, res) => {
   let geminiErrorMessage = null;
   let openaiErrorMessage = null;
+  let cheminFichierTemporaire = null;
 
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image reçue.' });
+    let cheminFichier = null;
+    let nomFichier = null;
+    let typeMime = 'image/jpeg';
+    let tailleFichier = 0;
 
-    const cheminFichier = req.file.path;
+    // 1. Récupération du fichier via multipart (req.file ou req.files)
+    const fichierRecu = req.file || (req.files && req.files.length > 0 ? req.files[0] : null);
+
+    if (fichierRecu) {
+      cheminFichier = fichierRecu.path;
+      nomFichier = fichierRecu.filename;
+      typeMime = fichierRecu.mimetype;
+      tailleFichier = fichierRecu.size;
+    } else {
+      // 2. Repli : Récupération de l'image au format Base64 dans req.body (ex: req.body.image, req.body.recto, req.body.base64)
+      const rawBase64 = req.body.image || req.body.recto || req.body.base64 || req.body.file;
+
+      if (rawBase64 && typeof rawBase64 === 'string') {
+        const base64Clean = rawBase64.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Clean, 'base64');
+        const uploadDir = process.env.UPLOAD_DIR || 'uploads';
+
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+
+        nomFichier = `scan_b64_${Date.now()}.png`;
+        cheminFichier = path.join(uploadDir, nomFichier);
+        fs.writeFileSync(cheminFichier, buffer);
+        cheminFichierTemporaire = cheminFichier;
+        tailleFichier = buffer.length;
+        typeMime = 'image/png';
+      }
+    }
+
+    if (!cheminFichier || !fs.existsSync(cheminFichier)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Aucune image reçue. Envoyez le fichier dans le champ "image", "recto" ou en Base64.',
+      });
+    }
+
     let document = null;
-
     // Enregistrement MongoDB non-bloquant
     try {
       if (Document) {
         document = await Document.create({
-          nomFichier:    req.file.filename,
+          nomFichier,
           cheminFichier,
-          typeMime:      req.file.mimetype,
-          tailleFichier: req.file.size,
+          typeMime,
+          tailleFichier,
         });
       }
     } catch (dbErr) {
@@ -42,7 +82,7 @@ const scannerImage = async (req, res) => {
     let modeExtraction = 'GEMINI_VISION';
     let texteRaw = '';
 
-    // 1. Priorité 1 : Google Gemini Vision (Gratuit & Rapide)
+    // Priorité 1 : Google Gemini Vision (Gratuit, Rapide, Précis)
     const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (geminiKey) {
       try {
@@ -54,9 +94,11 @@ const scannerImage = async (req, res) => {
         geminiErrorMessage = geminiErr.message;
         console.error('⚠️ Échec de l\'extraction Gemini Vision :', geminiErr.message);
       }
+    } else {
+      console.warn('⚠️ GEMINI_API_KEY absente du process.env (Vérifiez le fichier .env et redémarrez le serveur)');
     }
 
-    // 2. Priorité 2 : OpenAI Vision (si disponible)
+    // Priorité 2 : OpenAI Vision (si disponible)
     if (!infosExtraites && process.env.OPENAI_API_KEY) {
       try {
         console.log('🤖 Extraction des données via OpenAI Vision...');
@@ -69,7 +111,7 @@ const scannerImage = async (req, res) => {
       }
     }
 
-    // 3. Priorité 3 : Repli sur Veryfi si disponible
+    // Priorité 3 : Repli sur Veryfi si disponible
     if (!infosExtraites && VERYFI_API_KEY && VERYFI_USERNAME) {
       try {
         console.log('📡 Extraction via Veryfi...');
@@ -106,14 +148,14 @@ const scannerImage = async (req, res) => {
     }
 
     const io = req.app.get('io');
-    if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier: req.file.filename });
+    if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier });
 
     return res.json({
       success: true,
       message: `Scan terminé avec succès via ${modeExtraction}.`,
       document: document
         ? { id: document._id, nomFichier: document.nomFichier }
-        : { nomFichier: req.file.filename },
+        : { nomFichier },
       infosExtraites,
       texteRaw,
     });

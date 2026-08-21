@@ -5,6 +5,7 @@ const { authentifier } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
 router.use(authentifier);
-router.post('/', upload.single('image'), scannerImage);
+// upload.any() permet d'accepter n'importe quel nom de champ ('image', 'file', 'recto', 'document')
+router.post('/', upload.any(), scannerImage);
 
 module.exports = router;
