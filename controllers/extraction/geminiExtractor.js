@@ -11,9 +11,9 @@ const getMimeType = (filePath) => {
 };
 
 /**
- * Liste des modèles Gemini pris en charge par ordre de préférence
+ * Liste des modèles Gemini pris en charge (gemini-3.6-flash en priorité)
  */
-const MODES_GEMINI = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+const MODES_GEMINI = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
 
 /**
  * Analyse une image de pièce d'identité avec Google Gemini Vision
@@ -106,7 +106,7 @@ Règles de formatage strictes :
       };
     } catch (err) {
       lastError = err;
-      console.warn(`⚠️ Tentative Gemini (${modelName}) échouée, essai modèle suivant...`, err.message);
+      console.warn(`⚠️ Tentative Gemini (${modelName}) échouée :`, err.message);
     }
   }
 
