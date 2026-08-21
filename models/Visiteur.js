@@ -11,6 +11,8 @@ const visiteurSchema = new mongoose.Schema({
 
   // Pièce d'identité
   numeroPiece:      { type: String, required: true, unique: true },
+  nin:              { type: String, maxlength: 50, default: null },
+  codePays:         { type: String, maxlength: 10, default: null },
   typePiece:        { 
     type: String, 
     enum: ['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE'], 
@@ -22,6 +24,15 @@ const visiteurSchema = new mongoose.Schema({
 
   // Adresse
   adresseDomicile:  { type: String, maxlength: 255, default: null },
+
+  // Données Électorales & Géographiques
+  numeroElecteur:   { type: String, maxlength: 100, default: null },
+  region:           { type: String, maxlength: 100, default: null },
+  departement:      { type: String, maxlength: 100, default: null },
+  arrondissement:   { type: String, maxlength: 100, default: null },
+  commune:          { type: String, maxlength: 100, default: null },
+  lieuDeVote:       { type: String, maxlength: 200, default: null },
+  bureauDeVote:     { type: String, maxlength: 50, default: null },
 
 }, { timestamps: true });
 

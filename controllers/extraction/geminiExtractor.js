@@ -35,11 +35,11 @@ const parseTailleCentimetres = (valeur) => {
 const MODES_GEMINI = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
 
 /**
- * Analyse une image de pièce d'identité avec Google Gemini Vision (optimisé pour CNI CEDEAO / Sénégal / Passeports)
- * Extraits ciblés : Taille, Lieu de Naissance, Adresse Domicile, NIN / N° de pièce.
+ * Analyse une image de pièce d'identité avec Google Gemini Vision
+ * Extraits ciblés : Données d'identité, Données Électorales & Géographiques.
  * 
  * @param {string|Buffer} sourceImage - Chemin de fichier, Buffer binaire ou chaîne Base64
- * @returns {Promise<Object>} Données d'identité extraites
+ * @returns {Promise<Object>} Données d'identité et électorales extraites
  */
 const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -79,32 +79,36 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un système d'IA expert en reconnaissance optique (OCR) et analyse de documents d'identité officiels (Carte Nationale d'Identité CNI, Carte CNI CEDEAO Sénégal/Afrique de l'Ouest, Passeport, Carte Consulaire, Permis de Conduire, Carte de Séjour).
+  const promptSysteme = `Tu es un système d'IA expert en reconnaissance optique (OCR) et analyse de documents d'identité officiels (Carte Nationale d'Identité CNI, Carte CNI CEDEAO Sénégal/Afrique de l'Ouest, Carte d'Électeur, Passeport, Carte Consulaire, Permis de Conduire, Carte de Séjour).
 
-Examine minutieusement l'image fournie (recto ou verso). Recherche activement et extrais les informations clés suivantes :
+Examine minutieusement l'image fournie (recto ou verso). Recherche activement et extrais TOUTES les informations d'identité, administratives et électorales suivantes :
 
-1. **NIN / Numéro de Pièce (numeroPiece)** :
-   - Sur les CNI CEDEAO/Sénégal : il s'agit du N° IDENTIFICATION NATIONALE (NIN), une suite de 13 ou 14 chiffres (ex: "1 751 1995 00123" ou "2751..."). Extrais cette suite complète de chiffres sans espaces.
-   - Sur les passeports ou autres cartes : le N° de Passeport ou N° de Document.
-
-2. **Lieu de Naissance (lieuNaissance)** :
-   - Recherche les mentions "Lieu de naissance", "Place of birth", "Né(e) à" (ex: "Dakar", "Ziguinchor", "Thiès", "Saint-Louis", "Pikine", etc.).
-
-3. **Taille (taille)** :
-   - Recherche les mentions "Taille", "Height" (ex: "1,75 m", "1m75", "175 cm"). Convertis impérativement en un nombre entier représentant la taille en centimètres (ex: 175).
-
-4. **Adresse de Domicile (adresseDomicile)** :
-   - Recherche les mentions "Adresse", "Domicile", "Résidence", "Address" (souvent présent au verso ou au recto des cartes d'identité et permis).
-
-5. **Autres données d'identité** :
+1. **Données d'Identité Principales** :
    - Nom de famille (nom)
    - Prénom(s) (prenom)
-   - Date de naissance (dateNaissance au format YYYY-MM-DD)
+   - Date de naissance (dateNaissance au format "YYYY-MM-DD")
+   - Lieu de naissance (lieuNaissance, ex: "Dakar", "Ziguinchor", "Thiès", etc.)
    - Sexe ("M" ou "F")
-   - Date de délivrance (dateDelivrance au format YYYY-MM-DD)
-   - Date d'expiration (dateExpiration au format YYYY-MM-DD)
-   - Centre d'enregistrement / Autorité émettrice (centreEnregistrement)
+   - Taille (taille en cm, ex: 175)
+   - Adresse de domicile (adresseDomicile)
    - Nationalité (nationalite)
+
+2. **Données de la Pièce & Dates** :
+   - NIN / Numéro de pièce (numeroPiece / nin) : suite de 13-14 chiffres ou numéro de passeport
+   - Code Pays (codePays) : code ISO à 3 lettres du pays émetteur (ex: "SEN", "CIV", "MLI", "GIN", "CMR", "MAR", etc.)
+   - Type de Pièce (typePiece) : parmi ["CNI", "PASSEPORT", "PERMIS", "CARTE_CONSULAIRE", "CARTE_SEJOUR", "CARTE_IDENTITE_CEDEAO"]
+   - Date de délivrance (dateDelivrance au format "YYYY-MM-DD")
+   - Date d'expiration (dateExpiration au format "YYYY-MM-DD")
+   - Centre d'enregistrement / Autorité émettrice (centreEnregistrement)
+
+3. **Données Électorales & Découpage Géographique** (souvent présentes au verso ou sur cartes électorales) :
+   - Numéro d'électeur (numeroElecteur, ex: N° Électeur / N° Carte électorale)
+   - Région (region, ex: "Dakar", "Thiès", "Diourbel", "Saint-Louis", etc.)
+   - Département (departement, ex: "Dakar", "Pikine", "Rufisque", etc.)
+   - Arrondissement (arrondissement, ex: "Almadies", "Grand Dakar", etc.)
+   - Commune (commune, ex: "Mermoz-Sacré-Cœur", "Fann-Point E", etc.)
+   - Lieu de vote / Centre de vote (lieuDeVote, ex: "École Mermoz", "Centre d'État Civil", etc.)
+   - Bureau de vote (bureauDeVote / bureau, ex: "Bureau 1", "01", "B02")
 
 Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce schéma :
 {
@@ -114,14 +118,22 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
   "lieuNaissance": string ou null,
   "sexe": "M" ou "F" ou null,
   "taille": integer (cm, ex: 175) ou null,
-  "numeroPiece": string (NIN ou n° passeport/carte) ou null,
-  "nin": string (NIN à 13-14 chiffres) ou null,
-  "typePiece": string parmi ["CNI", "PASSEPORT", "PERMIS", "CARTE_CONSULAIRE", "CARTE_SEJOUR", "CARTE_IDENTITE_CEDEAO"],
+  "numeroPiece": string ou null,
+  "nin": string ou null,
+  "codePays": string (3 lettres ex: "SEN") ou null,
+  "typePiece": string ou null,
   "dateDelivrance": string "YYYY-MM-DD" ou null,
   "dateExpiration": string "YYYY-MM-DD" ou null,
   "centreEnregistrement": string ou null,
   "adresseDomicile": string ou null,
-  "nationalite": string ou null
+  "nationalite": string ou null,
+  "numeroElecteur": string ou null,
+  "region": string ou null,
+  "departement": string ou null,
+  "arrondissement": string ou null,
+  "commune": string ou null,
+  "lieuDeVote": string ou null,
+  "bureauDeVote": string ou null
 }`;
 
   let lastError = null;
@@ -154,12 +166,20 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
         taille: tailleCm,
         numeroPiece: numeroPieceExtrait ? String(numeroPieceExtrait).replace(/\s+/g, '').trim() : null,
         nin: parsedData.nin ? String(parsedData.nin).replace(/\s+/g, '').trim() : (numeroPieceExtrait ? String(numeroPieceExtrait).replace(/\s+/g, '').trim() : null),
+        codePays: parsedData.codePays ? String(parsedData.codePays).toUpperCase().trim() : null,
         typePiece: parsedData.typePiece || 'CNI',
         dateDelivrance: parsedData.dateDelivrance || null,
         dateExpiration: parsedData.dateExpiration || null,
         centreEnregistrement: parsedData.centreEnregistrement ? String(parsedData.centreEnregistrement).trim() : null,
         adresseDomicile: parsedData.adresseDomicile ? String(parsedData.adresseDomicile).trim() : null,
         nationalite: parsedData.nationalite ? String(parsedData.nationalite).trim() : null,
+        numeroElecteur: parsedData.numeroElecteur ? String(parsedData.numeroElecteur).trim() : null,
+        region: parsedData.region ? String(parsedData.region).trim() : null,
+        departement: parsedData.departement ? String(parsedData.departement).trim() : null,
+        arrondissement: parsedData.arrondissement ? String(parsedData.arrondissement).trim() : null,
+        commune: parsedData.commune ? String(parsedData.commune).trim() : null,
+        lieuDeVote: parsedData.lieuDeVote ? String(parsedData.lieuDeVote).trim() : null,
+        bureauDeVote: parsedData.bureauDeVote ? String(parsedData.bureauDeVote).trim() : null,
         formatDetecte: 'GEMINI_VISION',
       };
     } catch (err) {
