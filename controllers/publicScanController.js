@@ -29,13 +29,14 @@ const traiterPublicScan = async (req, res) => {
   try {
     let { agentId, scanData = {}, image, recto, source } = req.body;
 
-    // 1. Extraction automatique via Gemini Vision si une image est fournie
+    // 1. Extraction automatique via Gemini Vision si une image ou un document est fourni
     const imageSource = req.file?.buffer || req.files?.[0]?.buffer || req.file?.path || image || recto || req.body.base64;
+    const typeMime = req.file?.mimetype || req.files?.[0]?.mimetype || null;
     
     if (imageSource && (!scanData.nom || !scanData.prenom || !scanData.numeroPiece)) {
       try {
-        console.log('🤖 Analyse d\'image automatique dans public-scan via Gemini Vision...');
-        const ocrInfos = await extraireInfosAvecGemini(imageSource);
+        console.log('🤖 Analyse de document automatique dans public-scan via Gemini Vision...');
+        const ocrInfos = await extraireInfosAvecGemini(imageSource, typeMime);
         if (ocrInfos) {
           scanData = { ...ocrInfos, ...scanData };
         }

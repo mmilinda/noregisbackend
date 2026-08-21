@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const sharp = require('sharp');
 
 const getMimeType = (filePath) => {
   if (typeof filePath !== 'string') return 'image/jpeg';
@@ -8,6 +9,7 @@ const getMimeType = (filePath) => {
   if (ext === '.png') return 'image/png';
   if (ext === '.webp') return 'image/webp';
   if (ext === '.gif') return 'image/gif';
+  if (ext === '.pdf') return 'application/pdf';
   return 'image/jpeg';
 };
 
@@ -30,15 +32,16 @@ const parseTailleCentimetres = (valeur) => {
 };
 
 /**
- * Liste des modèles Gemini pris en charge (gemini-3.6-flash en priorité)
+ * Liste des modèles Gemini officiels pris en charge
  */
-const MODES_GEMINI = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
+const MODES_GEMINI = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
 
 /**
- * Analyse une image de pièce d'identité avec Google Gemini Vision
+ * Analyse une image ou un document (PDF / image) de pièce d'identité avec Google Gemini Vision
  * Extraits ciblés : Données d'identité, Données Électorales & Géographiques.
  * 
  * @param {string|Buffer} sourceImage - Chemin de fichier, Buffer binaire ou chaîne Base64
+ * @param {string|null} mimeTypeForm - Type MIME fourni en amont
  * @returns {Promise<Object>} Données d'identité et électorales extraites
  */
 const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
@@ -54,20 +57,34 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     buffer = sourceImage;
   } else if (typeof sourceImage === 'string') {
     if (sourceImage.startsWith('data:')) {
-      const matchMime = sourceImage.match(/^data:(image\/\w+);base64,/);
+      const matchMime = sourceImage.match(/^data:([^;]+);base64,/);
       if (matchMime) mimeType = matchMime[1];
-      const base64Data = sourceImage.replace(/^data:image\/\w+;base64,/, '');
+      const base64Data = sourceImage.replace(/^data:[^;]+;base64,/, '');
       buffer = Buffer.from(base64Data, 'base64');
     } else if (fs.existsSync(sourceImage)) {
       buffer = fs.readFileSync(sourceImage);
-      mimeType = getMimeType(sourceImage);
+      mimeType = (mimeTypeForm && mimeTypeForm !== 'image/jpeg') ? mimeTypeForm : getMimeType(sourceImage);
     } else {
       buffer = Buffer.from(sourceImage, 'base64');
     }
   }
 
   if (!buffer || buffer.length === 0) {
-    throw new Error('L\'image fournie est vide ou corrompue.');
+    throw new Error('Le document fourni est vide ou corrompu.');
+  }
+
+  // Optimisation & Redressement automatique pour les images (JPEG, PNG, WebP, etc.)
+  if (mimeType !== 'application/pdf') {
+    try {
+      buffer = await sharp(buffer)
+        .rotate() // Redresse automatiquement selon l'orientation EXIF
+        .resize({ width: 2000, height: 2000, fit: 'inside', withoutEnlargement: true }) // Redimensionnement intelligent
+        .jpeg({ quality: 85 }) // Compression optimale pour la rapidité et la lisibilité OCR
+        .toBuffer();
+      mimeType = 'image/jpeg';
+    } catch (sharpErr) {
+      console.warn('⚠️ Prétraitement sharp ignoré (fallback image brute) :', sharpErr.message);
+    }
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
