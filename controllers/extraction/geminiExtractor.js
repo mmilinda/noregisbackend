@@ -90,7 +90,14 @@ const decoderBandeMRZ = (mrzText) => {
       }
     }
 
-    // 2. Ligne Date Naissance + Sexe + Expiration MRZ (ex: "9410189M2609267SEN<<<<<<<<<<<8")
+    // 2. Ligne NIN / Numéro de pièce MRZ (ex: "I<SEN17511994012344<<<<<<<<<<<<<")
+    const matchNinMrz = line.match(/(?:[A-Z0-9<]{2,5})(\d{13,14})\d/);
+    if (matchNinMrz) {
+      res.nin = matchNinMrz[1];
+      res.numeroPiece = matchNinMrz[1];
+    }
+
+    // 3. Ligne Date Naissance + Sexe + Expiration MRZ (ex: "9410189M2609267SEN<<<<<<<<<<<8")
     const matchDates = line.match(/(\d{6})\d([MF])(\d{6})/);
     if (matchDates) {
       const [, yymmddBirth, sex, yymmddExp] = matchDates;
@@ -133,13 +140,13 @@ const validerEtCorrigerDonnees = (parsed) => {
   }
 
   // 2. NIN sénégalais (13-14 chiffres purs)
-  const allText = `${parsed.nin || ''} ${parsed.numeroPiece || ''}`;
+  const allText = `${mrzDecoded.nin || ''} ${parsed.nin || ''} ${parsed.numeroPiece || ''}`;
   const matchNinChiffres = allText.match(/(?:^|\D)(\d{13,14})(?:\D|$)/);
   
-  let nin = matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null);
+  let nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
   if (nin && nin.length < 8) nin = null;
 
-  let numeroPiece = nettoyerNumeroPiece(parsed.numeroPiece) || nin;
+  let numeroPiece = mrzDecoded.numeroPiece || nettoyerNumeroPiece(parsed.numeroPiece) || nin;
 
   // 3. Normalisation & Ordonnancement logique des dates
   let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
@@ -222,17 +229,17 @@ const responseSchema = {
     },
     sexe: { type: SchemaType.STRING },
     taille: { type: SchemaType.STRING },
-    numeroPiece: { type: SchemaType.STRING },
-    nin: { type: SchemaType.STRING },
+    numeroPiece: { type: SchemaType.STRING, description: "Numéro de pièce ou N° CNI" },
+    nin: { type: SchemaType.STRING, description: "Numéro d'Identification National (NIN)" },
     codePays: { type: SchemaType.STRING },
     typePiece: { type: SchemaType.STRING },
     dateDelivrance: { type: SchemaType.STRING },
     dateExpiration: { type: SchemaType.STRING },
     centreEnregistrement: { type: SchemaType.STRING },
     adresseDomicile: { type: SchemaType.STRING },
-    mrzLine1: { type: SchemaType.STRING, description: "Texte brut de la 1ère ligne MRZ en bas de carte si présente" },
-    mrzLine2: { type: SchemaType.STRING, description: "Texte brut de la 2ème ligne MRZ en bas de carte si présente" },
-    mrzLine3: { type: SchemaType.STRING, description: "Texte brut de la 3ème ligne MRZ en bas de carte si présente (ex: MENDY<<MILINDA<<<<<<)" },
+    mrzLine1: { type: SchemaType.STRING, description: "1ère ligne MRZ au bas de la carte (ex: I<SEN17511994012344<<<<<<<<<<<<<)" },
+    mrzLine2: { type: SchemaType.STRING, description: "2ème ligne MRZ au bas de la carte (ex: 9410189M2609267SEN<<<<<<<<<<<8)" },
+    mrzLine3: { type: SchemaType.STRING, description: "3ème ligne MRZ au bas de la carte (ex: MENDY<<MILINDA<<<<<<<<<<<<<<<<<)" },
   },
   required: ["nom", "prenom"],
 };
@@ -266,7 +273,7 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   }
 
   if (!buffer || buffer.length === 0) {
-    throw new Error('Le document me fourni est vide ou corrompu.');
+    throw new Error('Le document fourni est vide ou corrompu.');
   }
 
   // Prétraitement Haute Définition (1800px / JPEG 90) pour une lisibilité vectorielle des caractères
@@ -293,13 +300,16 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
 
   const promptSysteme = `Tu es un système OCR d'ultra-précision pour cartes d'identité CNI CEDEAO Sénégal / Afrique de l'Ouest.
 
-RÈGLES D'EXTRACTION STRICTES :
+EXAMINE ET EXTRAIS SANS ERREUR :
 1. **nom** : Le Nom de famille exact imprimé sur la ligne "Nom / Surname" (ex: "MENDY", "DIOP", "SOW"). Ne mets jamais le prénom !
 2. **prenom** : Le ou les Prénom(s) exacts imprimés sur la ligne "Prénom(s) / Given Names" (ex: "MILINDA"). Ne mets jamais le nom de famille !
 3. **dateNaissance** : La date de naissance au format "YYYY-MM-DD" (ex: "1994-10-18").
 4. **lieuNaissance** : La ville de naissance (ex: "DAKAR").
-5. **mrzLine3** : La 3ème ligne de la bande optique MRZ au bas de la carte si présente (ex: "MENDY<<MILINDA<<<<<<<<<<<<<<<<<").
-6. **mrzLine2** : La 2ème ligne de la bande optique MRZ si présente (ex: "9410189M2609267SEN<<<<<<<<<<<8").`;
+5. **numeroPiece** : Le numéro officiel de la pièce (N° CNI / ID Card No).
+6. **nin** : Le Numéro d'Identification National à 13 ou 14 chiffres.
+7. **mrzLine1** : La 1ère ligne MRZ au bas de la carte si présente.
+8. **mrzLine2** : La 2ème ligne MRZ au bas de la carte si présente.
+9. **mrzLine3** : La 3ème ligne MRZ au bas de la carte si présente.`;
 
   const model = genAI.getGenerativeModel({
     model: 'gemini-1.5-flash',
