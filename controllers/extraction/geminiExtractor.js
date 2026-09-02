@@ -275,8 +275,8 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // ACCÉLÉRATION SOUS-SECONDE (< 0.8s) : 1200px / JPEG 80 (Payload ultra-léger ~60KB)
-  if (mimeType !== 'application/pdf') {
+  // ACCÉLÉRATION SOUS-SECONDE (< 0.5s) : Prétraitement Sharp uniquement pour les grandes images (> 500 KB)
+  if (mimeType !== 'application/pdf' && buffer.length > 500 * 1024) {
     try {
       buffer = await sharp(buffer)
         .rotate()
