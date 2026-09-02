@@ -204,34 +204,33 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un moteur OCR de précision maximale spécialisé dans le décodage de pièces d'identité (Carte Nationale d'Identité CNI CEDEAO Sénégal / Afrique de l'Ouest, Passeport biométrique, Carte Consulaire, Permis de Conduire, Carte de Séjour).
+  const promptSysteme = `Tu es un moteur OCR de précision maximale spécialisé dans le décodage de pièces d'identité (Carte Nationale d'Identité CNI CEDEAO Sénégal / Afrique de l'Ouest, Carte d'Électeur, Passeport biométrique, Carte Consulaire, Permis de Conduire, Carte de Séjour).
 
-DIRECTIVES STRICTES DE DÉCODAGE CHIRURGICAL ET DE MAPPING :
+DIRECTIVES STRICTES POUR L'EXTRACTION DES CHAMPS DU RECTO DE LA CARTE :
 
-1. **ZONE MRZ (BANDE OPTIQUE EN BAS AVEC DES CHEVRONS "<<<") - SOURCE DE VÉRITÉ** :
-   - Si la carte ou le passeport contient une bande MRZ en bas, tu DOIS l'utiliser pour valider avec une certitude absolue :
-   - **Nom (nom)** : C'est le premier mot de la 3ème ligne MRZ avant les chevrons "<<<" (ex: "MENDY" dans "MENDY<<MILINDA<<<<<<").
-   - **Prénom(s) (prenom)** : Ce sont les mots situés après les chevrons "<<" de la 3ème ligne MRZ (ex: "MILINDA" dans "MENDY<<MILINDA<<<<<<").
-   - **Date de naissance (dateNaissance)** : Les 6 premiers chiffres de la 2ème ligne MRZ au format YYMMDD (ex: "941018" -> "1994-10-18").
-   - **Sexe (sexe)** : Le caractère suivant la date de naissance dans la 2ème ligne MRZ ("M" ou "F").
-   - **Date d'expiration (dateExpiration)** : Les 6 chiffres d'expiration dans la 2ème ligne MRZ au format YYMMDD (ex: "260926" -> "2026-09-26").
-   - **NIN / Numéro de pièce (nin / numeroPiece)** : La suite de chiffres de la 1ère ligne MRZ (ex: "1751199401234").
+1. **NOM DE FAMILLE (nom)** :
+   - C'est EXCLUSIVEMENT le Nom de famille du titulaire imprimé sur la ligne "Nom / Surname" (ex: "MENDY", "DIOP", "SOW", "NDIAYE", "SENGHOR").
+   - Ne mets JAMAIS le ou les prénoms dans ce champ !
 
-2. **TEXTE IMPRIMÉ SUR LA CARTE** :
-   - **nom** (SURNAME) : Ligne "Nom / Surname" (ex: "MENDY"). Ne mets JAMAIS le prénom ici !
-   - **prenom** (GIVEN NAMES) : Ligne "Prénom(s) / Given Names" (ex: "MILINDA"). Ne mets JAMAIS le nom de famille ici !
-   - **dateNaissance** : Ligne "Date de Naissance / Date of birth" au format "YYYY-MM-DD" (ex: "1994-10-18").
-   - **lieuNaissance** : Ligne "Lieu de Naissance / Place of birth" (ex: "DAKAR").
-   - **nin** : Ligne "N° CNI / ID Card No" ou "NIN" (suite de 13 ou 14 chiffres purs).
-   - **numeroPiece** : Numéro officiel de la pièce (NIN ou numéro de passeport ex: "A12345678").
-   - **dateDelivrance** : Ligne "Date de Délivrance / Date of issue" au format "YYYY-MM-DD".
-   - **dateExpiration** : Ligne "Date d'Expiration / Date of expiry" au format "YYYY-MM-DD".
-   - **centreEnregistrement** : Ligne "Centre d'Enregistrement".
-   - **adresseDomicile** : Ligne "Adresse / Address" (au verso).
-   - **codePays** : Code ISO 3 lettres ("SEN").
-   - **typePiece** : parmi ["CARTE_IDENTITE_CEDEAO", "CNI", "PASSEPORT", "PERMIS", "CARTE_CONSULAIRE", "CARTE_SEJOUR"].
+2. **PRÉNOM(S) (prenom)** :
+   - Ce sont EXCLUSIVEMENT le ou les prénoms personnels imprimés sur la ligne "Prénom(s) / Given Names" (ex: "MILINDA", "CHEIKH AHMADOU BAMBA", "MAMADOU").
+   - Ne mets JAMAIS le nom de famille dans ce champ !
 
-Si l'image provient d'une webcam et est inversée en miroir ou pivotée, lis le texte à l'endroit.`;
+3. **DATE DE NAISSANCE (dateNaissance)** :
+   - La date de naissance exacte imprimée sur la ligne "Date de naissance / Date of birth".
+   - Convertis-la OBLIGATOIREMENT au format strict ISO "YYYY-MM-DD" (ex: 18/10/1994 -> "1994-10-18").
+
+4. **LIEU DE NAISSANCE (lieuNaissance)** :
+   - La ville ou commune de naissance exacte imprimée sur la ligne "Lieu de naissance / Place of birth" (ex: "DAKAR", "ZIGUINCHOR", "THIES").
+   - Ne conserve que le nom propre de la ville sans préfixe.
+
+5. **ZONE MRZ (BANDE OPTIQUE EN BAS DU DOCUMENT EN CHEVRONS "<<<")** :
+   - Si la bande MRZ est présente en bas, utilise-la pour confirmer avec 100% de certitude :
+     * 3ème ligne MRZ : le premier mot est le NOM, les mots après "<<" sont les PRÉNOMS.
+     * 2ème ligne MRZ : les 6 premiers chiffres sont la Date de naissance YYMMDD.
+     * 1ère ligne MRZ : le Numéro de pièce / NIN.
+
+Si l'image provient d'une webcam et est pivotée ou en miroir, lis le texte à l'endroit.`;
 
   let lastError = null;
 
