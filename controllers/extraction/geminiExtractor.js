@@ -14,6 +14,41 @@ const getMimeType = (filePath) => {
 };
 
 /**
+ * Normalise les dates sous forme de chaîne YYYY-MM-DD
+ */
+const normaliserDate = (valeur) => {
+  if (!valeur || typeof valeur !== 'string') return null;
+  const str = valeur.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const matchFr = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (matchFr) {
+    const [, d, m, y] = matchFr;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  return str;
+};
+
+/**
+ * Nettoie les numéros de pièce et NIN (retire uniquement les libellés parasites "N°", "NIN:", "CNI:")
+ */
+const nettoyerNumeroPiece = (valeur) => {
+  if (!valeur) return null;
+  let str = String(valeur).trim();
+  str = str.replace(/^(N°\s*DE\s*LA\s*CARTE|N°\s*CNI|N°|CNI|NIN|ID|PASSEPORT|PASSPORT|NUMBER|NUMERO|CARD)\s*:?\s*/i, '');
+  return str.trim() || null;
+};
+
+/**
+ * Nettoie les noms et prénoms (retire uniquement les libellés parasites "Nom:", "Prénom:")
+ */
+const nettoyerNomPrenom = (valeur) => {
+  if (!valeur) return null;
+  let str = String(valeur).trim();
+  str = str.replace(/^(SURNAME|GIVEN\s*NAMES?|NAMES?|NOM|PRENOM|PRÉNOM|NOMS?|PRÉNOMS?)\s*(\/|\\|\:|-|\s)*\s*/i, '');
+  return str.trim() || null;
+};
+
+/**
  * Convertit toute représentation de taille (ex: "1,75m", "1m75", "1.75", 175) en cm entier (ex: 175)
  */
 const parseTailleCentimetres = (valeur) => {
@@ -38,7 +73,6 @@ const MODES_GEMINI = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
 
 /**
  * Analyse une image ou un document (PDF / image) de pièce d'identité avec Google Gemini Vision
- * Extraits ciblés : Données d'identité, Données Électorales & Géographiques.
  * 
  * @param {string|Buffer} sourceImage - Chemin de fichier, Buffer binaire ou chaîne Base64
  * @param {string|null} mimeTypeForm - Type MIME fourni en amont
@@ -73,17 +107,17 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // Optimisation & Redressement automatique pour les images (JPEG, PNG, WebP, etc.)
+  // Prétraitement Haute Qualité pour les images (JPEG, PNG, WebP)
   if (mimeType !== 'application/pdf') {
     try {
       buffer = await sharp(buffer)
-        .rotate() // Redresse automatiquement selon l'orientation EXIF
-        .resize({ width: 2000, height: 2000, fit: 'inside', withoutEnlargement: true }) // Redimensionnement intelligent
-        .jpeg({ quality: 85 }) // Compression optimale pour la rapidité et la lisibilité OCR
+        .rotate()
+        .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 90 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
-      console.warn('⚠️ Prétraitement sharp ignoré (fallback image brute) :', sharpErr.message);
+      console.warn('⚠️ Prétraitement sharp ignoré :', sharpErr.message);
     }
   }
 
@@ -96,36 +130,24 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un système d'IA expert en reconnaissance optique (OCR) et analyse de documents d'identité officiels (Carte Nationale d'Identité CNI, Carte CNI CEDEAO Sénégal/Afrique de l'Ouest, Carte d'Électeur, Passeport, Carte Consulaire, Permis de Conduire, Carte de Séjour).
+  const promptSysteme = `Tu es un moteur OCR d'ultra-précision spécialisé dans l'analyse de documents d'identité officiels (Carte Nationale d'Identité CNI, Carte CNI CEDEAO Sénégal / Afrique de l'Ouest, Carte d'Électeur, Passeport, Carte Consulaire, Permis de Conduire, Carte de Séjour).
 
-Examine minutieusement l'image fournie (recto ou verso). Recherche activement et extrais TOUTES les informations d'identité, administratives et électorales suivantes :
+CONSIGNES STRICTES DE MAPPING :
+- **nom** : Le Nom de famille (SURNAME) de la ligne "Nom / Surname" (ex: "MENDY"). Ne le confonds pas avec le prénom.
+- **prenom** : Le ou les Prénom(s) (GIVEN NAMES) de la ligne "Prénom(s) / Given Names" (ex: "MILINDA").
+- **dateNaissance** : La date de naissance au format "YYYY-MM-DD" (ex: "1994-10-18").
+- **lieuNaissance** : La ville ou lieu de naissance (ex: "DAKAR").
+- **sexe** : "M" ou "F".
+- **taille** : La taille en cm (entier, ex: 175).
+- **nin** : Le Numéro d'Identification National à 13 ou 14 chiffres (ex: "1751199401234").
+- **numeroPiece** : Le numéro officiel de la pièce (NIN ou Numéro de passeport).
+- **dateDelivrance** : La date d'établissement au format "YYYY-MM-DD".
+- **dateExpiration** : La date d'expiration au format "YYYY-MM-DD".
+- **centreEnregistrement** : L'autorité émettrice / centre d'enregistrement.
+- **adresseDomicile** : L'adresse du domicile (au verso).
 
-1. **Données d'Identité Principales** :
-   - Nom de famille (nom)
-   - Prénom(s) (prenom)
-   - Date de naissance (dateNaissance au format "YYYY-MM-DD")
-   - Lieu de naissance (lieuNaissance, ex: "Dakar", "Ziguinchor", "Thiès", etc.)
-   - Sexe ("M" ou "F")
-   - Taille (taille en cm, ex: 175)
-   - Adresse de domicile (adresseDomicile)
-   - Nationalité (nationalite)
-
-2. **Données de la Pièce & Dates** :
-   - NIN / Numéro de pièce (numeroPiece / nin) : suite de 13-14 chiffres ou numéro de passeport
-   - Code Pays (codePays) : code ISO à 3 lettres du pays émetteur (ex: "SEN", "CIV", "MLI", "GIN", "CMR", "MAR", etc.)
-   - Type de Pièce (typePiece) : parmi ["CNI", "PASSEPORT", "PERMIS", "CARTE_CONSULAIRE", "CARTE_SEJOUR", "CARTE_IDENTITE_CEDEAO"]
-   - Date de délivrance (dateDelivrance au format "YYYY-MM-DD")
-   - Date d'expiration (dateExpiration au format "YYYY-MM-DD")
-   - Centre d'enregistrement / Autorité émettrice (centreEnregistrement)
-
-3. **Données Électorales & Découpage Géographique** (souvent présentes au verso ou sur cartes électorales) :
-   - Numéro d'électeur (numeroElecteur, ex: N° Électeur / N° Carte électorale)
-   - Région (region, ex: "Dakar", "Thiès", "Diourbel", "Saint-Louis", etc.)
-   - Département (departement, ex: "Dakar", "Pikine", "Rufisque", etc.)
-   - Arrondissement (arrondissement, ex: "Almadies", "Grand Dakar", etc.)
-   - Commune (commune, ex: "Mermoz-Sacré-Cœur", "Fann-Point E", etc.)
-   - Lieu de vote / Centre de vote (lieuDeVote, ex: "École Mermoz", "Centre d'État Civil", etc.)
-   - Bureau de vote (bureauDeVote / bureau, ex: "Bureau 1", "01", "B02")
+Si une zone MRZ (bande en bas avec symboles <<<) est présente, utilise-la pour valider les nom, prénom, numéro de pièce, date de naissance, sexe et expiration.
+Si l'image provient d'une webcam et est inversée en miroir ou pivotée, lis le texte à l'endroit.
 
 Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce schéma :
 {
@@ -134,10 +156,10 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
   "dateNaissance": string "YYYY-MM-DD" ou null,
   "lieuNaissance": string ou null,
   "sexe": "M" ou "F" ou null,
-  "taille": integer (cm, ex: 175) ou null,
+  "taille": integer ou null,
   "numeroPiece": string ou null,
   "nin": string ou null,
-  "codePays": string (3 lettres ex: "SEN") ou null,
+  "codePays": string ou null,
   "typePiece": string ou null,
   "dateDelivrance": string "YYYY-MM-DD" ou null,
   "dateExpiration": string "YYYY-MM-DD" ou null,
@@ -159,7 +181,10 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
     try {
       const model = genAI.getGenerativeModel({
         model: modelName,
-        generationConfig: { responseMimeType: 'application/json' },
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.0, // Température zéro pour éliminer toute hallucination
+        },
       });
 
       const result = await model.generateContent([promptSysteme, imagePart]);
@@ -171,22 +196,31 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
 
       const parsedData = JSON.parse(responseText);
 
-      const numeroPieceExtrait = parsedData.numeroPiece || parsedData.nin || null;
+      const nomExtrait = nettoyerNomPrenom(parsedData.nom);
+      const prenomExtrait = nettoyerNomPrenom(parsedData.prenom);
+      const rawNum = parsedData.numeroPiece || parsedData.nin || null;
+      const numeroPieceExtrait = nettoyerNumeroPiece(rawNum);
+      const ninExtrait = nettoyerNumeroPiece(parsedData.nin) || numeroPieceExtrait;
       const tailleCm = parseTailleCentimetres(parsedData.taille);
 
+      const dateNaissanceNorm = normaliserDate(parsedData.dateNaissance);
+      const dateDelivranceNorm = normaliserDate(parsedData.dateDelivrance);
+      const dateExpirationNorm = normaliserDate(parsedData.dateExpiration);
+
       return {
-        nom: parsedData.nom ? String(parsedData.nom).trim() : null,
-        prenom: parsedData.prenom ? String(parsedData.prenom).trim() : null,
-        dateNaissance: parsedData.dateNaissance || null,
+        // Clés en Français
+        nom: nomExtrait,
+        prenom: prenomExtrait,
+        dateNaissance: dateNaissanceNorm,
         lieuNaissance: parsedData.lieuNaissance ? String(parsedData.lieuNaissance).trim() : null,
-        sexe: parsedData.sexe || null,
+        sexe: (parsedData.sexe || '').toUpperCase().trim() || null,
         taille: tailleCm,
-        numeroPiece: numeroPieceExtrait ? String(numeroPieceExtrait).replace(/\s+/g, '').trim() : null,
-        nin: parsedData.nin ? String(parsedData.nin).replace(/\s+/g, '').trim() : (numeroPieceExtrait ? String(numeroPieceExtrait).replace(/\s+/g, '').trim() : null),
-        codePays: parsedData.codePays ? String(parsedData.codePays).toUpperCase().trim() : null,
-        typePiece: parsedData.typePiece || 'CNI',
-        dateDelivrance: parsedData.dateDelivrance || null,
-        dateExpiration: parsedData.dateExpiration || null,
+        numeroPiece: numeroPieceExtrait,
+        nin: ninExtrait,
+        codePays: parsedData.codePays ? String(parsedData.codePays).toUpperCase().trim() : 'SEN',
+        typePiece: parsedData.typePiece || 'CARTE_IDENTITE_CEDEAO',
+        dateDelivrance: dateDelivranceNorm,
+        dateExpiration: dateExpirationNorm,
         centreEnregistrement: parsedData.centreEnregistrement ? String(parsedData.centreEnregistrement).trim() : null,
         adresseDomicile: parsedData.adresseDomicile ? String(parsedData.adresseDomicile).trim() : null,
         nationalite: parsedData.nationalite ? String(parsedData.nationalite).trim() : null,
@@ -197,6 +231,22 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
         commune: parsedData.commune ? String(parsedData.commune).trim() : null,
         lieuDeVote: parsedData.lieuDeVote ? String(parsedData.lieuDeVote).trim() : null,
         bureauDeVote: parsedData.bureauDeVote ? String(parsedData.bureauDeVote).trim() : null,
+
+        // Alias bilingues
+        lastName: nomExtrait,
+        firstName: prenomExtrait,
+        birthDate: dateNaissanceNorm,
+        birthPlace: parsedData.lieuNaissance ? String(parsedData.lieuNaissance).trim() : null,
+        sex: (parsedData.sexe || '').toUpperCase().trim() || null,
+        height: tailleCm,
+        documentNumber: numeroPieceExtrait,
+        idNumber: ninExtrait,
+        documentType: parsedData.typePiece || 'CARTE_IDENTITE_CEDEAO',
+        issuedAt: dateDelivranceNorm,
+        expiresAt: dateExpirationNorm,
+        issuer: parsedData.centreEnregistrement ? String(parsedData.centreEnregistrement).trim() : null,
+        address: parsedData.adresseDomicile ? String(parsedData.adresseDomicile).trim() : null,
+
         formatDetecte: 'GEMINI_VISION',
       };
     } catch (err) {
@@ -209,3 +259,4 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
 };
 
 module.exports = { extraireInfosAvecGemini };
+
