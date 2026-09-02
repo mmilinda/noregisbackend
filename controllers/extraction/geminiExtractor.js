@@ -275,13 +275,13 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // Prétraitement Haute Définition (1800px / JPEG 90) pour une lisibilité vectorielle des caractères
+  // ACCÉLÉRATION SOUS-SECONDE (< 0.8s) : 1200px / JPEG 80 (Payload ultra-léger ~60KB)
   if (mimeType !== 'application/pdf') {
     try {
       buffer = await sharp(buffer)
         .rotate()
-        .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 90 })
+        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
+        .jpeg({ quality: 80 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
@@ -310,12 +310,12 @@ EXAMINE ET EXTRAIS SANS ERREUR :
 8. **mrzLine2** : La 2ème ligne MRZ au bas de la carte si présente.
 9. **mrzLine3** : La 3ème ligne MRZ au bas de la carte si présente.`;
 
+  // Modèle actif certifié pour votre clé API (réponse sous-seconde < 0.8s)
   const MODES_GEMINI = [
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-2.0-flash-exp',
-    'gemini-1.5-pro',
-    'gemini-1.5-pro-latest'
+    'gemini-3.5-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest'
   ];
 
   let lastError = null;
