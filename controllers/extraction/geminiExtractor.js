@@ -311,24 +311,37 @@ EXAMINE ET EXTRAIS SANS ERREUR :
 8. **mrzLine2** : La 2ème ligne MRZ au bas de la carte si présente.
 9. **mrzLine3** : La 3ème ligne MRZ au bas de la carte si présente.`;
 
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: responseSchema,
-      temperature: 0.0,
-    },
-  });
+  const MODES_GEMINI = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
+  let lastError = null;
 
-  const result = await model.generateContent([promptSysteme, imagePart]);
-  const responseText = result.response.text();
+  for (const modelName of MODES_GEMINI) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: responseSchema,
+          temperature: 0.0,
+        },
+      });
 
-  if (!responseText) {
-    throw new Error('Aucune réponse renvoyée par le modèle Gemini Flash');
+      const result = await model.generateContent([promptSysteme, imagePart]);
+      const responseText = result.response.text();
+
+      if (!responseText) {
+        throw new Error(`Aucune réponse renvoyée par le modèle ${modelName}`);
+      }
+
+      const parsedData = JSON.parse(responseText);
+      console.log(`✅ Extraction Gemini réussie avec le modèle actif ${modelName}`);
+      return validerEtCorrigerDonnees(parsedData);
+    } catch (err) {
+      lastError = err;
+      console.warn(`⚠️ Tentative Gemini (${modelName}) échouée :`, err.message);
+    }
   }
 
-  const parsedData = JSON.parse(responseText);
-  return validerEtCorrigerDonnees(parsedData);
+  throw new Error(`Google Gemini Vision Erreur: ${lastError?.message || 'Échec de génération'}`);
 };
 
 module.exports = { extraireInfosAvecGemini };
