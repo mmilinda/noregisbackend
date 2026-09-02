@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenerativeAI, SchemaType } = require('@google/generative-ai');
 const sharp = require('sharp');
 
 const getMimeType = (filePath) => {
@@ -67,16 +67,90 @@ const parseTailleCentimetres = (valeur) => {
 };
 
 /**
- * Liste des modèles Gemini officiels pris en charge
+ * Modèles Gemini d'ultra-précision
  */
 const MODES_GEMINI = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+
+/**
+ * Schéma JSON avec descriptions d'orientation visuelle pour l'IA
+ */
+const responseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    nom: { 
+      type: SchemaType.STRING, 
+      description: "EXCLUSIVEMENT le Nom de famille du titulaire (ligne 'Nom / Surname'). Ne mets JAMAIS le prénom ici." 
+    },
+    prenom: { 
+      type: SchemaType.STRING, 
+      description: "EXCLUSIVEMENT le ou les Prénom(s) du titulaire (ligne 'Prénom(s) / Given Names'). Ne mets JAMAIS le nom de famille ici." 
+    },
+    dateNaissance: { 
+      type: SchemaType.STRING, 
+      description: "Date de naissance au format YYYY-MM-DD (ligne 'Date de naissance / Date of birth')." 
+    },
+    lieuNaissance: { 
+      type: SchemaType.STRING, 
+      description: "Lieu / Ville de naissance (ligne 'Lieu de naissance / Place of birth')." 
+    },
+    sexe: { 
+      type: SchemaType.STRING, 
+      description: "Sexe ('M' pour Masculin, 'F' pour Féminin)." 
+    },
+    taille: { 
+      type: SchemaType.STRING, 
+      description: "Taille en cm (ex: 175)." 
+    },
+    numeroPiece: { 
+      type: SchemaType.STRING, 
+      description: "Numéro officiel de la pièce ou du passeport." 
+    },
+    nin: { 
+      type: SchemaType.STRING, 
+      description: "Numéro d'Identification National à 13 ou 14 chiffres (ligne 'N° CNI / ID Card No' ou 'NIN')." 
+    },
+    codePays: { 
+      type: SchemaType.STRING, 
+      description: "Code ISO 3 lettres du pays émetteur (ex: SEN)." 
+    },
+    typePiece: { 
+      type: SchemaType.STRING, 
+      description: "Type de document (CARTE_IDENTITE_CEDEAO, CNI, PASSEPORT, PERMIS)." 
+    },
+    dateDelivrance: { 
+      type: SchemaType.STRING, 
+      description: "Date d'établissement au format YYYY-MM-DD." 
+    },
+    dateExpiration: { 
+      type: SchemaType.STRING, 
+      description: "Date d'expiration au format YYYY-MM-DD." 
+    },
+    centreEnregistrement: { 
+      type: SchemaType.STRING, 
+      description: "Centre d'enregistrement / autorité d'émission." 
+    },
+    adresseDomicile: { 
+      type: SchemaType.STRING, 
+      description: "Adresse du domicile." 
+    },
+    nationalite: { type: SchemaType.STRING },
+    numeroElecteur: { type: SchemaType.STRING },
+    region: { type: SchemaType.STRING },
+    departement: { type: SchemaType.STRING },
+    arrondissement: { type: SchemaType.STRING },
+    commune: { type: SchemaType.STRING },
+    lieuDeVote: { type: SchemaType.STRING },
+    bureauDeVote: { type: SchemaType.STRING },
+  },
+  required: ["nom", "prenom"],
+};
 
 /**
  * Analyse une image ou un document (PDF / image) de pièce d'identité avec Google Gemini Vision
  * 
  * @param {string|Buffer} sourceImage - Chemin de fichier, Buffer binaire ou chaîne Base64
  * @param {string|null} mimeTypeForm - Type MIME fourni en amont
- * @returns {Promise<Object>} Données d'identité et électorales extraites
+ * @returns {Promise<Object>} Données d'identité extraites
  */
 const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -107,13 +181,13 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // Prétraitement Ultra-Rapide (< 1s) : 1000px / JPEG 75 (Payload ultra-léger ~50KB)
+  // Prétraitement Haute Définition (1600px / JPEG 88) pour une lisibilité parfaite des petits chiffres
   if (mimeType !== 'application/pdf') {
     try {
       buffer = await sharp(buffer)
         .rotate()
-        .resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
-        .jpeg({ quality: 75 })
+        .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 88 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
@@ -130,50 +204,34 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un moteur OCR d'ultra-précision spécialisé dans l'analyse de documents d'identité officiels (Carte Nationale d'Identité CNI, Carte CNI CEDEAO Sénégal / Afrique de l'Ouest, Carte d'Électeur, Passeport, Carte Consulaire, Permis de Conduire, Carte de Séjour).
+  const promptSysteme = `Tu es un moteur OCR de précision maximale spécialisé dans le décodage de pièces d'identité (Carte Nationale d'Identité CNI CEDEAO Sénégal / Afrique de l'Ouest, Passeport biométrique, Carte Consulaire, Permis de Conduire, Carte de Séjour).
 
-CONSIGNES STRICTES DE MAPPING :
-- **nom** : Le Nom de famille (SURNAME) de la ligne "Nom / Surname" (ex: "MENDY"). Ne le confonds pas avec le prénom.
-- **prenom** : Le ou les Prénom(s) (GIVEN NAMES) de la ligne "Prénom(s) / Given Names" (ex: "MILINDA").
-- **dateNaissance** : La date de naissance au format "YYYY-MM-DD" (ex: "1994-10-18").
-- **lieuNaissance** : La ville ou lieu de naissance (ex: "DAKAR").
-- **sexe** : "M" ou "F".
-- **taille** : La taille en cm (entier, ex: 175).
-- **nin** : Le Numéro d'Identification National à 13 ou 14 chiffres (ex: "1751199401234").
-- **numeroPiece** : Le numéro officiel de la pièce (NIN ou Numéro de passeport).
-- **dateDelivrance** : La date d'établissement au format "YYYY-MM-DD".
-- **dateExpiration** : La date d'expiration au format "YYYY-MM-DD".
-- **centreEnregistrement** : L'autorité émettrice / centre d'enregistrement.
-- **adresseDomicile** : L'adresse du domicile (au verso).
+DIRECTIVES STRICTES DE DÉCODAGE CHIRURGICAL ET DE MAPPING :
 
-Si une zone MRZ (bande en bas avec symboles <<<) est présente, utilise-la pour valider les nom, prénom, numéro de pièce, date de naissance, sexe et expiration.
-Si l'image provient d'une webcam et est inversée en miroir ou pivotée, lis le texte à l'endroit.
+1. **ZONE MRZ (BANDE OPTIQUE EN BAS AVEC DES CHEVRONS "<<<") - SOURCE DE VÉRITÉ** :
+   - Si la carte ou le passeport contient une bande MRZ en bas, tu DOIS l'utiliser pour valider avec une certitude absolue :
+   - **Nom (nom)** : C'est le premier mot de la 3ème ligne MRZ avant les chevrons "<<<" (ex: "MENDY" dans "MENDY<<MILINDA<<<<<<").
+   - **Prénom(s) (prenom)** : Ce sont les mots situés après les chevrons "<<" de la 3ème ligne MRZ (ex: "MILINDA" dans "MENDY<<MILINDA<<<<<<").
+   - **Date de naissance (dateNaissance)** : Les 6 premiers chiffres de la 2ème ligne MRZ au format YYMMDD (ex: "941018" -> "1994-10-18").
+   - **Sexe (sexe)** : Le caractère suivant la date de naissance dans la 2ème ligne MRZ ("M" ou "F").
+   - **Date d'expiration (dateExpiration)** : Les 6 chiffres d'expiration dans la 2ème ligne MRZ au format YYMMDD (ex: "260926" -> "2026-09-26").
+   - **NIN / Numéro de pièce (nin / numeroPiece)** : La suite de chiffres de la 1ère ligne MRZ (ex: "1751199401234").
 
-Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce schéma :
-{
-  "nom": string ou null,
-  "prenom": string ou null,
-  "dateNaissance": string "YYYY-MM-DD" ou null,
-  "lieuNaissance": string ou null,
-  "sexe": "M" ou "F" ou null,
-  "taille": integer ou null,
-  "numeroPiece": string ou null,
-  "nin": string ou null,
-  "codePays": string ou null,
-  "typePiece": string ou null,
-  "dateDelivrance": string "YYYY-MM-DD" ou null,
-  "dateExpiration": string "YYYY-MM-DD" ou null,
-  "centreEnregistrement": string ou null,
-  "adresseDomicile": string ou null,
-  "nationalite": string ou null,
-  "numeroElecteur": string ou null,
-  "region": string ou null,
-  "departement": string ou null,
-  "arrondissement": string ou null,
-  "commune": string ou null,
-  "lieuDeVote": string ou null,
-  "bureauDeVote": string ou null
-}`;
+2. **TEXTE IMPRIMÉ SUR LA CARTE** :
+   - **nom** (SURNAME) : Ligne "Nom / Surname" (ex: "MENDY"). Ne mets JAMAIS le prénom ici !
+   - **prenom** (GIVEN NAMES) : Ligne "Prénom(s) / Given Names" (ex: "MILINDA"). Ne mets JAMAIS le nom de famille ici !
+   - **dateNaissance** : Ligne "Date de Naissance / Date of birth" au format "YYYY-MM-DD" (ex: "1994-10-18").
+   - **lieuNaissance** : Ligne "Lieu de Naissance / Place of birth" (ex: "DAKAR").
+   - **nin** : Ligne "N° CNI / ID Card No" ou "NIN" (suite de 13 ou 14 chiffres purs).
+   - **numeroPiece** : Numéro officiel de la pièce (NIN ou numéro de passeport ex: "A12345678").
+   - **dateDelivrance** : Ligne "Date de Délivrance / Date of issue" au format "YYYY-MM-DD".
+   - **dateExpiration** : Ligne "Date d'Expiration / Date of expiry" au format "YYYY-MM-DD".
+   - **centreEnregistrement** : Ligne "Centre d'Enregistrement".
+   - **adresseDomicile** : Ligne "Adresse / Address" (au verso).
+   - **codePays** : Code ISO 3 lettres ("SEN").
+   - **typePiece** : parmi ["CARTE_IDENTITE_CEDEAO", "CNI", "PASSEPORT", "PERMIS", "CARTE_CONSULAIRE", "CARTE_SEJOUR"].
+
+Si l'image provient d'une webcam et est inversée en miroir ou pivotée, lis le texte à l'endroit.`;
 
   let lastError = null;
 
@@ -183,7 +241,8 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
         model: modelName,
         generationConfig: {
           responseMimeType: 'application/json',
-          temperature: 0.0, // Température zéro pour éliminer toute hallucination
+          responseSchema: responseSchema,
+          temperature: 0.0,
         },
       });
 
@@ -259,4 +318,3 @@ Tu dois retourner EXCLUSIVEMENT un objet JSON valide suivant exactement ce sché
 };
 
 module.exports = { extraireInfosAvecGemini };
-
