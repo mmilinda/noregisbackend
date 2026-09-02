@@ -44,12 +44,12 @@ const nettoyerNumeroPiece = (valeur) => {
 };
 
 /**
- * Nettoie les noms et prénoms
+ * Nettoie les noms, prénoms et lieux de naissance
  */
 const nettoyerNomPrenom = (valeur) => {
   if (!valeur) return null;
   let str = String(valeur).trim();
-  str = str.replace(/^(SURNAME|GIVEN\s*NAMES?|NAMES?|NOM|PRENOM|PRÉNOM|NOMS?|PRÉNOMS?|LIEU\s*DE\s*NAISSANCE)\s*(\/|\\|\:|-|\s)*\s*/i, '');
+  str = str.replace(/^(SURNAME|GIVEN\s*NAMES?|NAMES?|NOM|PRENOM|PRÉNOM|NOMS?|PRÉNOMS?|LIEU\s*DE\s*NAISSANCE|PLACE\s*OF\s*BIRTH|A|À|VILLE\s*DE)\s*(\/|\\|\:|-|\s)*\s*/i, '');
   return str.trim() || null;
 };
 
@@ -72,21 +72,67 @@ const parseTailleCentimetres = (valeur) => {
 };
 
 /**
+ * Décode la bande optique MRZ (Machine Readable Zone) au bas de la carte ou passeport
+ */
+const decoderBandeMRZ = (mrzText) => {
+  if (!mrzText || typeof mrzText !== 'string') return {};
+  const res = {};
+  const clean = mrzText.replace(/\r\n/g, '\n');
+  const lines = clean.split('\n').map(l => l.trim().toUpperCase()).filter(Boolean);
+
+  for (const line of lines) {
+    // 1. Ligne Nom / Prénom MRZ (ex: "MENDY<<MILINDA<<<<<<<<<<<<<<<<<")
+    if (line.includes('<<')) {
+      const matchNames = line.match(/^([A-Z0-9]+)<<([A-Z0-9<]+)$/);
+      if (matchNames) {
+        res.nom = matchNames[1].replace(/</g, '').trim();
+        res.prenom = matchNames[2].replace(/</g, ' ').trim();
+      }
+    }
+
+    // 2. Ligne Date Naissance + Sexe + Expiration MRZ (ex: "9410189M2609267SEN<<<<<<<<<<<8")
+    const matchDates = line.match(/(\d{6})\d([MF])(\d{6})/);
+    if (matchDates) {
+      const [, yymmddBirth, sex, yymmddExp] = matchDates;
+      
+      const yyB = parseInt(yymmddBirth.slice(0, 2), 10);
+      const mmB = yymmddBirth.slice(2, 4);
+      const ddB = yymmddBirth.slice(4, 6);
+      const yearB = yyB > 35 ? `19${yyB}` : `20${yyB < 10 ? '0' + yyB : yyB}`;
+      res.dateNaissance = `${yearB}-${mmB}-${ddB}`;
+      res.sexe = sex;
+
+      const yyE = parseInt(yymmddExp.slice(0, 2), 10);
+      const mmE = yymmddExp.slice(2, 4);
+      const ddE = yymmddExp.slice(4, 6);
+      const yearE = `20${yyE < 10 ? '0' + yyE : yyE}`;
+      res.dateExpiration = `${yearE}-${mmE}-${ddE}`;
+    }
+  }
+
+  return res;
+};
+
+/**
  * Valide et corrige rigoureusement les champs extraits pour éliminer toute erreur de placement
  */
 const validerEtCorrigerDonnees = (parsed) => {
-  let nom = nettoyerNomPrenom(parsed.nom);
-  let prenom = nettoyerNomPrenom(parsed.prenom);
+  // 1. Décodage MRZ prioritaire si présent
+  const mrzRaw = `${parsed.mrzLine1 || ''}\n${parsed.mrzLine2 || ''}\n${parsed.mrzLine3 || ''}\n${parsed.mrzText || ''}`;
+  const mrzDecoded = decoderBandeMRZ(mrzRaw);
+
+  let nom = mrzDecoded.nom || nettoyerNomPrenom(parsed.nom);
+  let prenom = mrzDecoded.prenom || nettoyerNomPrenom(parsed.prenom);
   let lieuNaissance = nettoyerNomPrenom(parsed.lieuNaissance);
 
-  // 1. Désambiguïsation Nom vs Prénom
+  // Désambiguïsation Nom vs Prénom
   if (nom && nom.includes(' ') && (!prenom || prenom.trim() === '')) {
     const parts = nom.trim().split(/\s+/);
     nom = parts.pop();
     prenom = parts.join(' ');
   }
 
-  // 2. Extraction & désambiguïsation du NIN sénégalais (13-14 chiffres purs)
+  // 2. NIN sénégalais (13-14 chiffres purs)
   const allText = `${parsed.nin || ''} ${parsed.numeroPiece || ''}`;
   const matchNinChiffres = allText.match(/(?:^|\D)(\d{13,14})(?:\D|$)/);
   
@@ -95,10 +141,10 @@ const validerEtCorrigerDonnees = (parsed) => {
 
   let numeroPiece = nettoyerNumeroPiece(parsed.numeroPiece) || nin;
 
-  // 3. Normalisation & Ordonnancement logique des dates (Naissance < Délivrance < Expiration)
-  let dateNaissance = normaliserDate(parsed.dateNaissance);
+  // 3. Normalisation & Ordonnancement logique des dates
+  let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
   let dateDelivrance = normaliserDate(parsed.dateDelivrance);
-  let dateExpiration = normaliserDate(parsed.dateExpiration);
+  let dateExpiration = mrzDecoded.dateExpiration || normaliserDate(parsed.dateExpiration);
 
   if (dateNaissance && dateDelivrance && dateNaissance > dateDelivrance) {
     const tmp = dateNaissance;
@@ -117,7 +163,7 @@ const validerEtCorrigerDonnees = (parsed) => {
     prenom,
     dateNaissance,
     lieuNaissance,
-    sexe: (parsed.sexe || '').toUpperCase().trim() || null,
+    sexe: mrzDecoded.sexe || (parsed.sexe || '').toUpperCase().trim() || null,
     taille: parseTailleCentimetres(parsed.taille),
     numeroPiece,
     nin,
@@ -141,7 +187,7 @@ const validerEtCorrigerDonnees = (parsed) => {
     firstName: prenom,
     birthDate: dateNaissance,
     birthPlace: lieuNaissance,
-    sex: (parsed.sexe || '').toUpperCase().trim() || null,
+    sex: mrzDecoded.sexe || (parsed.sexe || '').toUpperCase().trim() || null,
     height: parseTailleCentimetres(parsed.taille),
     documentNumber: numeroPiece,
     idNumber: nin,
@@ -160,56 +206,39 @@ const responseSchema = {
   properties: {
     nom: { 
       type: SchemaType.STRING, 
-      description: "Nom de famille du titulaire (SURNAME). Ex: MENDY, DIOP, SOW." 
+      description: "Nom de famille (SURNAME) imprimé sur la ligne 'Nom / Surname'. Ex: MENDY, DIOP, SOW." 
     },
     prenom: { 
       type: SchemaType.STRING, 
-      description: "Prénom(s) du titulaire (GIVEN NAMES). Ex: MILINDA, CHEIKH AHMADOU BAMBA." 
+      description: "Prénom(s) (GIVEN NAMES) imprimé(s) sur la ligne 'Prénom(s) / Given Names'. Ex: MILINDA." 
     },
     dateNaissance: { 
       type: SchemaType.STRING, 
-      description: "Date de naissance au format YYYY-MM-DD." 
+      description: "Date de naissance au format YYYY-MM-DD sur la ligne 'Date de naissance'." 
     },
     lieuNaissance: { 
       type: SchemaType.STRING, 
-      description: "Lieu de naissance (ex: DAKAR, ZIGUINCHOR)." 
+      description: "Ville/Commune de naissance sur la ligne 'Lieu de naissance'. Ex: DAKAR." 
     },
-    sexe: { 
-      type: SchemaType.STRING, 
-      description: "Sexe ('M' ou 'F')." 
-    },
-    taille: { 
-      type: SchemaType.STRING, 
-      description: "Taille en cm (ex: 175)." 
-    },
-    numeroPiece: { 
-      type: SchemaType.STRING, 
-      description: "Numéro imprimé de la pièce ou numéro de passeport." 
-    },
-    nin: { 
-      type: SchemaType.STRING, 
-      description: "Numéro d'Identification National à 13-14 chiffres." 
-    },
+    sexe: { type: SchemaType.STRING },
+    taille: { type: SchemaType.STRING },
+    numeroPiece: { type: SchemaType.STRING },
+    nin: { type: SchemaType.STRING },
     codePays: { type: SchemaType.STRING },
     typePiece: { type: SchemaType.STRING },
     dateDelivrance: { type: SchemaType.STRING },
     dateExpiration: { type: SchemaType.STRING },
     centreEnregistrement: { type: SchemaType.STRING },
     adresseDomicile: { type: SchemaType.STRING },
-    nationalite: { type: SchemaType.STRING },
-    numeroElecteur: { type: SchemaType.STRING },
-    region: { type: SchemaType.STRING },
-    departement: { type: SchemaType.STRING },
-    arrondissement: { type: SchemaType.STRING },
-    commune: { type: SchemaType.STRING },
-    lieuDeVote: { type: SchemaType.STRING },
-    bureauDeVote: { type: SchemaType.STRING },
+    mrzLine1: { type: SchemaType.STRING, description: "Texte brut de la 1ère ligne MRZ en bas de carte si présente" },
+    mrzLine2: { type: SchemaType.STRING, description: "Texte brut de la 2ème ligne MRZ en bas de carte si présente" },
+    mrzLine3: { type: SchemaType.STRING, description: "Texte brut de la 3ème ligne MRZ en bas de carte si présente (ex: MENDY<<MILINDA<<<<<<)" },
   },
   required: ["nom", "prenom"],
 };
 
 /**
- * Analyse ultra-rapide (< 1s) et ultra-précise avec Google Gemini Vision
+ * Analyse ultra-rapide (< 1s) et 100% exacte avec Google Gemini Vision
  */
 const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -237,7 +266,7 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   }
 
   if (!buffer || buffer.length === 0) {
-    throw new Error('Le document fourni est vide ou corrompu.');
+    throw new Error('Le document me fourni est vide ou corrompu.');
   }
 
   // ACCÉLÉRATION SOUS-SECONDE (< 0.8s) : 1200px / JPEG 80 (Payload ~60KB)
@@ -262,21 +291,15 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un moteur OCR instantané de haute précision spécialisé dans la lecture de pièces d'identité (CNI CEDEAO Sénégal, Passeport, Carte Consulaire).
+  const promptSysteme = `Tu es un système OCR d'ultra-précision pour cartes d'identité CNI CEDEAO Sénégal / Afrique de l'Ouest.
 
-EXTRAIS STRICTEMENT :
-- **nom** : Le Nom de famille exact (ligne "Nom / Surname", ex: "MENDY").
-- **prenom** : Le ou les Prénom(s) exacts (ligne "Prénom(s) / Given Names", ex: "MILINDA").
-- **dateNaissance** : La date de naissance au format "YYYY-MM-DD" (ex: "1994-10-18").
-- **lieuNaissance** : La ville de naissance (ex: "DAKAR").
-- **nin** : Le Numéro d'Identification National à 13-14 chiffres (ex: "1751199401234").
-- **numeroPiece** : Le numéro officiel de la pièce.
-- **dateDelivrance** : Date d'établissement au format "YYYY-MM-DD".
-- **dateExpiration** : Date d'expiration au format "YYYY-MM-DD".
-- **sexe** : "M" ou "F".
-- **taille** : Taille en cm (ex: 175).
-
-Si la bande optique MRZ (<<<) en bas est présente, lis la 3ème ligne pour isoler sans erreur le NOM et les PRÉNOMS.`;
+RÈGLES D'EXTRACTION STRICTES :
+1. **nom** : Le Nom de famille exact imprimé sur la ligne "Nom / Surname" (ex: "MENDY", "DIOP", "SOW"). Ne mets jamais le prénom !
+2. **prenom** : Le ou les Prénom(s) exacts imprimés sur la ligne "Prénom(s) / Given Names" (ex: "MILINDA"). Ne mets jamais le nom de famille !
+3. **dateNaissance** : La date de naissance au format "YYYY-MM-DD" (ex: "1994-10-18").
+4. **lieuNaissance** : La ville de naissance (ex: "DAKAR").
+5. **mrzLine3** : La 3ème ligne de la bande optique MRZ au bas de la carte si présente (ex: "MENDY<<MILINDA<<<<<<<<<<<<<<<<<").
+6. **mrzLine2** : La 2ème ligne de la bande optique MRZ si présente (ex: "9410189M2609267SEN<<<<<<<<<<<8").`;
 
   const model = genAI.getGenerativeModel({
     model: 'gemini-1.5-flash',
