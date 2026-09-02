@@ -269,13 +269,13 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document me fourni est vide ou corrompu.');
   }
 
-  // ACCÉLÉRATION SOUS-SECONDE (< 0.8s) : 1200px / JPEG 80 (Payload ~60KB)
+  // Prétraitement Haute Définition (1800px / JPEG 90) pour une lisibilité vectorielle des caractères
   if (mimeType !== 'application/pdf') {
     try {
       buffer = await sharp(buffer)
         .rotate()
-        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
-        .jpeg({ quality: 80 })
+        .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 90 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
