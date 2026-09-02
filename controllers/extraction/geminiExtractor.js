@@ -107,13 +107,13 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // Prétraitement Haute Qualité pour les images (JPEG, PNG, WebP)
+  // Prétraitement Ultra-Rapide (< 1s) : 1000px / JPEG 75 (Payload ultra-léger ~50KB)
   if (mimeType !== 'application/pdf') {
     try {
       buffer = await sharp(buffer)
         .rotate()
-        .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 90 })
+        .resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
+        .jpeg({ quality: 75 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
