@@ -241,11 +241,10 @@ const responseSchema = {
     mrzLine2: { type: SchemaType.STRING, description: "2ème ligne MRZ au bas de la carte (ex: 9410189M2609267SEN<<<<<<<<<<<8)" },
     mrzLine3: { type: SchemaType.STRING, description: "3ème ligne MRZ au bas de la carte (ex: MENDY<<MILINDA<<<<<<<<<<<<<<<<<)" },
   },
-  required: ["nom", "prenom"],
 };
 
 /**
- * Analyse ultra-rapide (< 1s) et 100% exacte avec Google Gemini Vision
+ * Analyse 100% exacte avec Google Gemini Vision et boucle de secours multi-modèles
  */
 const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -298,7 +297,7 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un système OCR d'ultra-précision pour cartes d'identité CNI CEDEAO Sénégal / Afrique de l'Ouest.
+  const promptSysteme = `Tu es un système OCR d'ultra-précision pour cartes d'identité CNI CEDEAO Sénégal / Afrique de l'Ouest, Passeports, Permis de Conduire, Cartes Grises et Cartes de Séjour.
 
 EXAMINE ET EXTRAIS SANS ERREUR :
 1. **nom** : Le Nom de famille exact imprimé sur la ligne "Nom / Surname" (ex: "MENDY", "DIOP", "SOW"). Ne mets jamais le prénom !
@@ -311,7 +310,14 @@ EXAMINE ET EXTRAIS SANS ERREUR :
 8. **mrzLine2** : La 2ème ligne MRZ au bas de la carte si présente.
 9. **mrzLine3** : La 3ème ligne MRZ au bas de la carte si présente.`;
 
-  const MODES_GEMINI = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
+  const MODES_GEMINI = [
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-2.0-flash-exp',
+    'gemini-1.5-pro',
+    'gemini-1.5-pro-latest'
+  ];
+
   let lastError = null;
 
   for (const modelName of MODES_GEMINI) {
@@ -333,7 +339,7 @@ EXAMINE ET EXTRAIS SANS ERREUR :
       }
 
       const parsedData = JSON.parse(responseText);
-      console.log(`✅ Extraction Gemini réussie avec le modèle actif ${modelName}`);
+      console.log(`✅ Extraction Gemini réussie avec le modèle ${modelName}`);
       return validerEtCorrigerDonnees(parsedData);
     } catch (err) {
       lastError = err;
