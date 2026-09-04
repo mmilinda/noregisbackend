@@ -1,4 +1,15 @@
-const { Visiteur, Visite, Document } = require('../models');
+/**
+ * Construit un regex flexible pour faire correspondre les numéros de téléphone
+ * peu importe les espaces, tirets ou indicatifs (+221, 00221, etc.)
+ */
+const construireRegexTelephone = (queryTel) => {
+  if (!queryTel) return null;
+  const digitsOnly = String(queryTel).replace(/\D/g, '');
+  if (digitsOnly.length < 6) return null;
+  const lastDigits = digitsOnly.slice(-8);
+  const regexPattern = lastDigits.split('').join('[\\s.-]*');
+  return new RegExp(regexPattern, 'i');
+};
 
 /**
  * Recherche un visiteur existant par son numéro de téléphone
@@ -10,16 +21,18 @@ const rechercherParTelephone = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Le numéro de téléphone est requis.' });
     }
 
-    const numClean = String(queryTel).replace(/[^\d+]/g, '');
-    const regexTel = new RegExp(numClean.slice(-8), 'i');
+    const regexTel = construireRegexTelephone(queryTel);
+    const filtre = regexTel 
+      ? {
+          $or: [
+            { telephone: { $regex: regexTel } },
+            { telephone: String(queryTel).trim() },
+            { numeroPiece: String(queryTel).trim() }
+          ]
+        }
+      : { telephone: String(queryTel).trim() };
 
-    const visiteur = await Visiteur.findOne({
-      $or: [
-        { telephone: { $regex: regexTel } },
-        { telephone: String(queryTel).trim() },
-        { numeroPiece: String(queryTel).trim() }
-      ]
-    });
+    const visiteur = await Visiteur.findOne(filtre);
 
     if (!visiteur) {
       return res.status(404).json({
@@ -52,9 +65,9 @@ const creerVisiteur = async (req, res) => {
       existeDeja = await Visiteur.findOne({ numeroPiece });
     }
     if (!existeDeja && telephone) {
-      const numClean = String(telephone).replace(/[^\d+]/g, '');
-      if (numClean.length >= 6) {
-        existeDeja = await Visiteur.findOne({ telephone: { $regex: numClean.slice(-8), $options: 'i' } });
+      const regexTel = construireRegexTelephone(telephone);
+      if (regexTel) {
+        existeDeja = await Visiteur.findOne({ telephone: { $regex: regexTel } });
       }
     }
 
