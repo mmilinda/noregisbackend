@@ -3,6 +3,7 @@ const Visiteur = require('../models/Visiteur');
 const Visite = require('../models/Visite');
 const Utilisateur = require('../models/Utilisateur');
 const { extraireInfosAvecGemini } = require('./extraction');
+const { evaluerFiabiliteDocument } = require('../services/fiabiliteService');
 
 const parseDate = (value) => {
   if (!value) return null;
@@ -103,6 +104,8 @@ const traiterPublicScan = async (req, res) => {
 
     // Notification Socket.io en temps réel
     const io = req.app.get('io');
+    const fiabilite = evaluerFiabiliteDocument(scanData);
+
     const notificationPayload = {
       agentId: agent?._id || agentId,
       visiteId: visite?._id,
@@ -111,6 +114,7 @@ const traiterPublicScan = async (req, res) => {
       service: agent?.poste || agent?.departement || 'Entrée QR',
       source: source || 'QR public',
       scanData,
+      fiabilite,
       createdAt: new Date(),
     };
 
@@ -123,6 +127,7 @@ const traiterPublicScan = async (req, res) => {
       success: true,
       message: 'Scan traité avec succès.',
       scanData,
+      fiabilite,
       visiteur: visiteur || visitorPayload,
       visite,
       reference: visite?._id || `ref_${Date.now()}`,

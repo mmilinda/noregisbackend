@@ -7,6 +7,7 @@ const {
   extraireInfosDepuisVeryfi,
   extraireInfosAvecGemini,
 } = require('./extraction');
+const { evaluerFiabiliteDocument } = require('../services/fiabiliteService');
 
 const VERYFI_CLIENT_ID     = process.env.VERYFI_CLIENT_ID;
 const VERYFI_CLIENT_SECRET = process.env.VERYFI_CLIENT_SECRET;
@@ -127,8 +128,10 @@ const scannerImage = async (req, res) => {
       });
     }
 
+    const fiabilite = evaluerFiabiliteDocument(infosExtraites);
+
     const io = req.app.get('io');
-    if (io) io.emit('ocr:donnees', { infosExtraites, nomFichier });
+    if (io) io.emit('ocr:donnees', { infosExtraites, fiabilite, nomFichier });
 
     return res.json({
       success: true,
@@ -137,6 +140,7 @@ const scannerImage = async (req, res) => {
         ? { id: document._id, nomFichier: document.nomFichier }
         : { nomFichier },
       infosExtraites,
+      fiabilite,
     });
   } catch (err) {
     console.error('Erreur globale scan :', err.message);
