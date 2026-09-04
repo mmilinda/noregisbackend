@@ -22,7 +22,8 @@ const visiteurSchema = new mongoose.Schema({
   dateExpiration:   { type: Date, default: null },
   centreEnregistrement: { type: String, maxlength: 200, default: null },
 
-  // Adresse
+  // Contact & Adresse
+  telephone:        { type: String, maxlength: 30, sparse: true, default: null, index: true },
   adresseDomicile:  { type: String, maxlength: 255, default: null },
 
   // Données Électorales & Géographiques

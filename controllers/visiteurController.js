@@ -1,16 +1,68 @@
 const { Visiteur, Visite, Document } = require('../models');
 
+/**
+ * Recherche un visiteur existant par son numéro de téléphone
+ */
+const rechercherParTelephone = async (req, res) => {
+  try {
+    const queryTel = req.query.telephone || req.query.phone || req.query.q;
+    if (!queryTel) {
+      return res.status(400).json({ success: false, message: 'Le numéro de téléphone est requis.' });
+    }
+
+    const numClean = String(queryTel).replace(/[^\d+]/g, '');
+    const regexTel = new RegExp(numClean.slice(-8), 'i');
+
+    const visiteur = await Visiteur.findOne({
+      $or: [
+        { telephone: { $regex: regexTel } },
+        { telephone: String(queryTel).trim() },
+        { numeroPiece: String(queryTel).trim() }
+      ]
+    });
+
+    if (!visiteur) {
+      return res.status(404).json({
+        success: false,
+        message: 'Aucun visiteur trouvé avec ce numéro de téléphone.'
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Visiteur existant trouvé dans la base de données.',
+      visiteur
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 const creerVisiteur = async (req, res) => {
   try {
     const {
       nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
       numeroPiece, typePiece, dateDelivrance, dateExpiration,
       centreEnregistrement, adresseDomicile,
-      nin
+      nin, telephone
     } = req.body;
 
-    const existeDeja = await Visiteur.findOne({ numeroPiece });
+    let existeDeja = null;
+    if (numeroPiece) {
+      existeDeja = await Visiteur.findOne({ numeroPiece });
+    }
+    if (!existeDeja && telephone) {
+      const numClean = String(telephone).replace(/[^\d+]/g, '');
+      if (numClean.length >= 6) {
+        existeDeja = await Visiteur.findOne({ telephone: { $regex: numClean.slice(-8), $options: 'i' } });
+      }
+    }
+
     if (existeDeja) {
+      if (telephone && !existeDeja.telephone) {
+        existeDeja.telephone = telephone;
+        await existeDeja.save();
+      }
       return res.status(200).json({
         success: true,
         message: 'Visiteur déjà enregistré.',
@@ -24,7 +76,7 @@ const creerVisiteur = async (req, res) => {
       nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
       numeroPiece, typePiece, dateDelivrance, dateExpiration,
       centreEnregistrement, adresseDomicile,
-      nin
+      nin, telephone
     });
 
     res.status(201).json({
@@ -112,8 +164,9 @@ const supprimerVisiteur = async (req, res) => {
 
 module.exports = {
   creerVisiteur,
+  rechercherParTelephone,
   listerVisiteurs,
   getVisiteur,
   modifierVisiteur,
-  supprimerVisiteur   // 👈 export de la nouvelle fonction
+  supprimerVisiteur
 };

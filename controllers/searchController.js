@@ -12,6 +12,8 @@ const rechercher = async (req, res) => {
         { nom:         { $regex: query, $options: 'i' } },
         { prenom:      { $regex: query, $options: 'i' } },
         { numeroPiece: { $regex: query, $options: 'i' } },
+        { nin:         { $regex: query, $options: 'i' } },
+        { telephone:   { $regex: query, $options: 'i' } },
       ];
     }
     const filtreVisite = {};
