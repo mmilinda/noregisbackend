@@ -10,7 +10,14 @@ const enregistrerEntree = async (req, res) => {
       return res.status(409).json({ success: false, message: "Ce visiteur est déjà à l'intérieur.", visiteEnCours });
     }
     const visite = await Visite.create({ visiteurId, personneVisitee, service, motif, heureEntree: new Date(), statut: 'EN_COURS' });
-    res.status(201).json({ success: true, message: `Entrée enregistrée à ${new Date().toLocaleTimeString('fr-SN')}`, visite: { ...visite.toObject(), visiteur } });
+    
+    const completeVisite = { ...visite.toObject(), visiteurId: visiteur, visiteur };
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('visite:entree', completeVisite);
+    }
+
+    res.status(201).json({ success: true, message: `Entrée enregistrée à ${new Date().toLocaleTimeString('fr-SN')}`, visite: completeVisite });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -24,6 +31,12 @@ const enregistrerSortie = async (req, res) => {
     visite.heureSortie = new Date();
     visite.statut      = 'TERMINE';
     await visite.save();
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('visite:sortie', visite);
+    }
+
     const dureeMinutes = Math.round((new Date() - new Date(visite.heureEntree)) / 60000);
     res.json({ success: true, message: `Sortie enregistrée. Durée : ${dureeMinutes} min.`, visite });
   } catch (err) {
@@ -63,7 +76,6 @@ const visitesEnCours = async (req, res) => {
   }
 };
 
-// 👇 NOUVELLE FONCTION : suppression d'une visite
 const supprimerVisite = async (req, res) => {
   try {
     const visite = await Visite.findById(req.params.id);
@@ -71,6 +83,12 @@ const supprimerVisite = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Visite introuvable.' });
     }
     await Visite.findByIdAndDelete(req.params.id);
+    
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('visite:supprimee', { id: req.params.id });
+    }
+
     res.json({ success: true, message: 'Visite supprimée avec succès.' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -82,5 +100,5 @@ module.exports = {
   enregistrerSortie,
   listerVisites,
   visitesEnCours,
-  supprimerVisite   // 👈 export de la nouvelle fonction
+  supprimerVisite
 };

@@ -121,6 +121,10 @@ const traiterPublicScan = async (req, res) => {
     if (io) {
       if (agent?._id) io.to(`agent-${agent._id}`).emit('public-scan', notificationPayload);
       io.emit('public-scan', notificationPayload);
+      if (visite && visiteur) {
+        const completeVisite = { ...visite.toObject(), visiteurId: visiteur, visiteur };
+        io.emit('visite:entree', completeVisite);
+      }
     }
 
     return res.status(200).json({
