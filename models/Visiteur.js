@@ -11,7 +11,7 @@ const visiteurSchema = new mongoose.Schema({
 
   // Pièce d'identité
   numeroPiece:      { type: String, required: true, index: true },
-  nin:              { type: String, maxlength: 50, default: null },
+  nin:              { type: String, maxlength: 50, default: null, index: true },
   codePays:         { type: String, maxlength: 10, default: null },
   typePiece:        { 
     type: String, 
@@ -23,7 +23,7 @@ const visiteurSchema = new mongoose.Schema({
   centreEnregistrement: { type: String, maxlength: 200, default: null },
 
   // Contact & Adresse
-  telephone:        { type: String, maxlength: 30, sparse: true, default: null, index: true },
+  telephone:        { type: String, maxlength: 30, default: null },
   adresseDomicile:  { type: String, maxlength: 255, default: null },
 
   // Données Électorales & Géographiques

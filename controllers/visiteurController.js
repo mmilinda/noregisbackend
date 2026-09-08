@@ -12,32 +12,32 @@ const construireRegexTelephone = (queryTel) => {
 };
 
 /**
- * Recherche un visiteur existant par son numéro de téléphone
+ * Recherche un visiteur existant par son NIN (Numéro d'Identification National) ou numéro de pièce
  */
-const rechercherParTelephone = async (req, res) => {
+const rechercherParNIN = async (req, res) => {
   try {
-    const queryTel = req.query.telephone || req.query.phone || req.query.q;
-    if (!queryTel) {
-      return res.status(400).json({ success: false, message: 'Le numéro de téléphone est requis.' });
+    const queryNin = req.query.nin || req.query.q || req.query.telephone || req.query.phone;
+    if (!queryNin) {
+      return res.status(400).json({ success: false, message: 'Le NIN est requis.' });
     }
 
-    const regexTel = construireRegexTelephone(queryTel);
-    const filtre = regexTel 
-      ? {
-          $or: [
-            { telephone: { $regex: regexTel } },
-            { telephone: String(queryTel).trim() },
-            { numeroPiece: String(queryTel).trim() }
-          ]
-        }
-      : { telephone: String(queryTel).trim() };
+    const rawQuery = String(queryNin).trim();
+    const digitsOnly = rawQuery.replace(/\D/g, '');
+
+    const filtre = {
+      $or: [
+        { nin: rawQuery },
+        ...(digitsOnly.length >= 5 ? [{ nin: { $regex: digitsOnly, $options: 'i' } }] : []),
+        { numeroPiece: rawQuery }
+      ]
+    };
 
     const visiteur = await Visiteur.findOne(filtre);
 
     if (!visiteur) {
       return res.status(404).json({
         success: false,
-        message: 'Aucun visiteur trouvé avec ce numéro de téléphone.'
+        message: 'Aucun visiteur trouvé avec ce NIN.'
       });
     }
 
@@ -61,8 +61,12 @@ const creerVisiteur = async (req, res) => {
     } = req.body;
 
     let cleanNumPiece = numeroPiece ? String(numeroPiece).trim() : null;
+    let cleanNin = nin ? String(nin).trim() : null;
+
     if (!cleanNumPiece || cleanNumPiece.toLowerCase() === 'undefined' || cleanNumPiece.toLowerCase() === 'null') {
-      if (telephone) {
+      if (cleanNin) {
+        cleanNumPiece = `NIN-${cleanNin.replace(/\D/g, '')}`;
+      } else if (telephone) {
         cleanNumPiece = `TEL-${String(telephone).replace(/\D/g, '')}`;
       } else {
         cleanNumPiece = `VIS-${Date.now()}`;
@@ -70,18 +74,29 @@ const creerVisiteur = async (req, res) => {
     }
 
     let existeDeja = null;
-    if (cleanNumPiece) {
-      existeDeja = await Visiteur.findOne({ numeroPiece: cleanNumPiece });
+
+    // 1. Recherche prioritaire par NIN
+    if (cleanNin) {
+      const ninDigits = cleanNin.replace(/\D/g, '');
+      existeDeja = await Visiteur.findOne({
+        $or: [
+          { nin: cleanNin },
+          ...(ninDigits.length >= 6 ? [{ nin: { $regex: ninDigits, $options: 'i' } }] : [])
+        ]
+      });
     }
-    if (!existeDeja && telephone) {
-      const regexTel = construireRegexTelephone(telephone);
-      if (regexTel) {
-        existeDeja = await Visiteur.findOne({ telephone: { $regex: regexTel } });
-      }
+
+    // 2. Fallback recherche par Numéro de pièce
+    if (!existeDeja && cleanNumPiece) {
+      existeDeja = await Visiteur.findOne({ numeroPiece: cleanNumPiece });
     }
 
     if (existeDeja) {
       let modified = false;
+      if (cleanNin && !existeDeja.nin) {
+        existeDeja.nin = cleanNin;
+        modified = true;
+      }
       if (telephone && !existeDeja.telephone) {
         existeDeja.telephone = telephone;
         modified = true;
@@ -110,7 +125,7 @@ const creerVisiteur = async (req, res) => {
       dateExpiration,
       centreEnregistrement,
       adresseDomicile,
-      nin,
+      nin: cleanNin,
       telephone
     });
 
@@ -200,7 +215,8 @@ const supprimerVisiteur = async (req, res) => {
 
 module.exports = {
   creerVisiteur,
-  rechercherParTelephone,
+  rechercherParNIN,
+  rechercherParTelephone: rechercherParNIN,
   listerVisiteurs,
   getVisiteur,
   modifierVisiteur,
