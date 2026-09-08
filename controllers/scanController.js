@@ -90,7 +90,19 @@ const scannerImage = async (req, res) => {
       console.warn('⚠️ GEMINI_API_KEY absente du process.env (Vérifiez les variables d\'environnement Vercel)');
     }
 
-    // Priorité 2 : Veryfi (si configuré)
+    // Priorité 2 : OpenAI Vision (Secours si configuré)
+    if (!infosExtraites && process.env.OPENAI_API_KEY) {
+      try {
+        console.log('🤖 Extraction de secours via OpenAI Vision...');
+        const { extraireInfosAvecOpenAI } = require('./extraction/openaiExtractor');
+        infosExtraites = await extraireInfosAvecOpenAI(sourceImage);
+        modeExtraction = 'OPENAI_VISION';
+      } catch (oaiErr) {
+        console.error('⚠️ Échec de l\'extraction OpenAI Vision :', oaiErr.message);
+      }
+    }
+
+    // Priorité 3 : Veryfi (si configuré)
     if (!infosExtraites && VERYFI_API_KEY && VERYFI_USERNAME) {
       try {
         console.log('📡 Extraction via Veryfi...');

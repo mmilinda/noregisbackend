@@ -372,7 +372,35 @@ CONSIGNES D'EXTRACTION STRICTES SELON LE TYPE DE DOCUMENT DÉTECTÉ :
    - **modele** : Modèle (ex: Hilux, Corolla, Duster, Canter).
    - **couleur** : Couleur du véhicule si mentionnée (ex: Blanc, Gris, Noir).
    - **typeVehicule** : Genre du véhicule (ex: Voiture, Camion, Moto, Bus).
-   - **nom** et **prenom** : Nom et Prénom du titulaire du véhicule si indiqués.`;
+   - **nom** et **prenom** : Nom et Prénom du titulaire du véhicule si indiqués.
+
+Tu DOIS répondre EXCLUSIVEMENT sous la forme d'un objet JSON valide respectant cette structure exacte :
+{
+  "typePiece": "CNI" | "PASSEPORT" | "PERMIS" | "CARTE_GRISE" | "CARTE_CONSULAIRE" | "CARTE_SEJOUR",
+  "nom": string | null,
+  "prenom": string | null,
+  "dateNaissance": "YYYY-MM-DD" | null,
+  "lieuNaissance": string | null,
+  "sexe": "M" | "F" | null,
+  "taille": string | null,
+  "numeroPiece": string | null,
+  "nin": string | null,
+  "codePays": string | null,
+  "dateDelivrance": "YYYY-MM-DD" | null,
+  "dateExpiration": "YYYY-MM-DD" | null,
+  "centreEnregistrement": string | null,
+  "adresseDomicile": string | null,
+  "nationalite": string | null,
+  "immatriculation": string | null,
+  "marque": string | null,
+  "modele": string | null,
+  "couleur": string | null,
+  "typeVehicule": string | null,
+  "categoriesPermis": string | null,
+  "mrzLine1": string | null,
+  "mrzLine2": string | null,
+  "mrzLine3": string | null
+}`;
 
   const MODES_GEMINI = [
     'gemini-2.0-flash',
@@ -388,8 +416,7 @@ CONSIGNES D'EXTRACTION STRICTES SELON LE TYPE DE DOCUMENT DÉTECTÉ :
         model: modelName,
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema: responseSchema,
-          temperature: 0.0,
+          temperature: 0.1,
         },
       });
 
