@@ -60,9 +60,18 @@ const creerVisiteur = async (req, res) => {
       nin, telephone
     } = req.body;
 
+    let cleanNumPiece = numeroPiece ? String(numeroPiece).trim() : null;
+    if (!cleanNumPiece || cleanNumPiece.toLowerCase() === 'undefined' || cleanNumPiece.toLowerCase() === 'null') {
+      if (telephone) {
+        cleanNumPiece = `TEL-${String(telephone).replace(/\D/g, '')}`;
+      } else {
+        cleanNumPiece = `VIS-${Date.now()}`;
+      }
+    }
+
     let existeDeja = null;
-    if (numeroPiece) {
-      existeDeja = await Visiteur.findOne({ numeroPiece });
+    if (cleanNumPiece) {
+      existeDeja = await Visiteur.findOne({ numeroPiece: cleanNumPiece });
     }
     if (!existeDeja && telephone) {
       const regexTel = construireRegexTelephone(telephone);
@@ -72,10 +81,13 @@ const creerVisiteur = async (req, res) => {
     }
 
     if (existeDeja) {
+      let modified = false;
       if (telephone && !existeDeja.telephone) {
         existeDeja.telephone = telephone;
-        await existeDeja.save();
+        modified = true;
       }
+      if (modified) await existeDeja.save();
+
       return res.status(200).json({
         success: true,
         message: 'Visiteur déjà enregistré.',
@@ -86,10 +98,20 @@ const creerVisiteur = async (req, res) => {
     }
 
     const visiteur = await Visiteur.create({
-      nom, prenom, dateNaissance, lieuNaissance, sexe, taille,
-      numeroPiece, typePiece, dateDelivrance, dateExpiration,
-      centreEnregistrement, adresseDomicile,
-      nin, telephone
+      nom: nom || 'Visiteur',
+      prenom: prenom || 'Anonyme',
+      dateNaissance,
+      lieuNaissance,
+      sexe,
+      taille,
+      numeroPiece: cleanNumPiece,
+      typePiece: typePiece || 'CNI',
+      dateDelivrance,
+      dateExpiration,
+      centreEnregistrement,
+      adresseDomicile,
+      nin,
+      telephone
     });
 
     res.status(201).json({
@@ -100,6 +122,7 @@ const creerVisiteur = async (req, res) => {
       estNouveau: true
     });
   } catch (err) {
+    console.error('❌ Erreur creerVisiteur :', err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };

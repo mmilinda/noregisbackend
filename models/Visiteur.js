@@ -10,7 +10,7 @@ const visiteurSchema = new mongoose.Schema({
   taille:           { type: Number, min: 50, max: 300, default: null },
 
   // Pièce d'identité
-  numeroPiece:      { type: String, required: true, unique: true },
+  numeroPiece:      { type: String, required: true, index: true },
   nin:              { type: String, maxlength: 50, default: null },
   codePays:         { type: String, maxlength: 10, default: null },
   typePiece:        { 
