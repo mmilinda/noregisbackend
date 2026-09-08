@@ -120,11 +120,64 @@ const decoderBandeMRZ = (mrzText) => {
   return res;
 };
 
+
+
+const responseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    typePiece: { 
+      type: SchemaType.STRING, 
+      description: "Type de document d'identité détecté : 'CNI', 'PASSEPORT', 'PERMIS', 'CARTE_GRISE', 'CARTE_CONSULAIRE', 'CARTE_SEJOUR', ou 'AUTRE'." 
+    },
+    nom: { 
+      type: SchemaType.STRING, 
+      description: "Nom de famille (SURNAME / NOM) imprimé sur le document." 
+    },
+    prenom: { 
+      type: SchemaType.STRING, 
+      description: "Prénom(s) (GIVEN NAMES / PRÉNOM) imprimé(s) sur le document." 
+    },
+    dateNaissance: { 
+      type: SchemaType.STRING, 
+      description: "Date de naissance au format YYYY-MM-DD." 
+    },
+    lieuNaissance: { 
+      type: SchemaType.STRING, 
+      description: "Lieu/Ville de naissance." 
+    },
+    sexe: { type: SchemaType.STRING, description: "Sexe ('M' ou 'F')" },
+    taille: { type: SchemaType.STRING, description: "Taille en cm (ex: 175)" },
+    numeroPiece: { type: SchemaType.STRING, description: "Numéro officiel du document (N° CNI, N° Passeport, N° Permis, N° Immatriculation, N° Carte de Séjour, N° Carte Consulaire)" },
+    nin: { type: SchemaType.STRING, description: "Numéro d'Identification National (NIN) ou identifiant national unique" },
+    codePays: { type: SchemaType.STRING, description: "Code ISO du pays émetteur (ex: SEN, FRA, MLI, CIV, GIN, GMB)" },
+    dateDelivrance: { type: SchemaType.STRING, description: "Date d'émission / délivrance au format YYYY-MM-DD" },
+    dateExpiration: { type: SchemaType.STRING, description: "Date d'expiration / validité au format YYYY-MM-DD" },
+    centreEnregistrement: { type: SchemaType.STRING, description: "Autorité / Consulat / Préfecture / Ambassade émettrice" },
+    adresseDomicile: { type: SchemaType.STRING, description: "Adresse du domicile" },
+    nationalite: { type: SchemaType.STRING, description: "Nationalité du titulaire" },
+
+    // Champs spécifiques Carte Grise (Certificat d'immatriculation)
+    immatriculation: { type: SchemaType.STRING, description: "Numéro de plaque d'immatriculation du véhicule" },
+    marque: { type: SchemaType.STRING, description: "Marque du véhicule (ex: TOYOTA, PEUGEOT, MERCEDES, HONDA)" },
+    modele: { type: SchemaType.STRING, description: "Modèle du véhicule (ex: HILUX, COROLLA, DUSTER)" },
+    couleur: { type: SchemaType.STRING, description: "Couleur du véhicule (ex: BLANC, NOIR, GRIS, BLEU)" },
+    typeVehicule: { type: SchemaType.STRING, description: "Type/Genre de véhicule (ex: Voiture, Camion, Moto, Bus, Camionnette)" },
+
+    // Champs spécifiques Permis de conduire
+    categoriesPermis: { type: SchemaType.STRING, description: "Catégories de permis accordées (ex: A, B, C, D, EB)" },
+
+    // Bande optique MRZ (Passeport / CNI)
+    mrzLine1: { type: SchemaType.STRING, description: "1ère ligne MRZ au bas du passeport ou de la carte" },
+    mrzLine2: { type: SchemaType.STRING, description: "2ème ligne MRZ au bas du passeport ou de la carte" },
+    mrzLine3: { type: SchemaType.STRING, description: "3ème ligne MRZ si présente" },
+  },
+};
+
 /**
- * Valide et corrige rigoureusement les champs extraits pour éliminer toute erreur de placement
+ * Valide et corrige rigoureusement les champs extraits pour tous types de documents
  */
 const validerEtCorrigerDonnees = (parsed) => {
-  // 1. Décodage MRZ prioritaire si présent
+  // 1. Décodage MRZ prioritaire si présent (Passeport ou CNI)
   const mrzRaw = `${parsed.mrzLine1 || ''}\n${parsed.mrzLine2 || ''}\n${parsed.mrzLine3 || ''}\n${parsed.mrzText || ''}`;
   const mrzDecoded = decoderBandeMRZ(mrzRaw);
 
@@ -139,16 +192,32 @@ const validerEtCorrigerDonnees = (parsed) => {
     prenom = parts.join(' ');
   }
 
-  // 2. NIN sénégalais (13-14 chiffres purs)
+  // 2. Identification du type de pièce
+  let typePiece = parsed.typePiece || 'CNI';
+  const rawTextUpper = JSON.stringify(parsed).toUpperCase();
+
+  if (mrzRaw.startsWith('P<') || rawTextUpper.includes('PASSPORT') || rawTextUpper.includes('PASSEPORT')) {
+    typePiece = 'PASSEPORT';
+  } else if (rawTextUpper.includes('PERMIS DE CONDUIRE') || rawTextUpper.includes('DRIVING LICENCE') || parsed.categoriesPermis) {
+    typePiece = 'PERMIS';
+  } else if (rawTextUpper.includes('CARTE GRISE') || rawTextUpper.includes('IMMATRICULATION') || parsed.immatriculation || parsed.marque) {
+    typePiece = 'CARTE_GRISE';
+  } else if (rawTextUpper.includes('CONSULAIRE') || rawTextUpper.includes('CONSULAR')) {
+    typePiece = 'CARTE_CONSULAIRE';
+  } else if (rawTextUpper.includes('SÉJOUR') || rawTextUpper.includes('SEJOUR') || rawTextUpper.includes('RESIDENCE PERMIT')) {
+    typePiece = 'CARTE_SEJOUR';
+  }
+
+  // 3. NIN & Numéro de pièce
   const allText = `${mrzDecoded.nin || ''} ${parsed.nin || ''} ${parsed.numeroPiece || ''}`;
   const matchNinChiffres = allText.match(/(?:^|\D)(\d{13,14})(?:\D|$)/);
   
   let nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
   if (nin && nin.length < 8) nin = null;
 
-  let numeroPiece = mrzDecoded.numeroPiece || nettoyerNumeroPiece(parsed.numeroPiece) || nin;
+  let numeroPiece = mrzDecoded.numeroPiece || parsed.immatriculation || nettoyerNumeroPiece(parsed.numeroPiece) || nin;
 
-  // 3. Normalisation & Ordonnancement logique des dates
+  // 4. Normalisation des dates
   let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
   let dateDelivrance = normaliserDate(parsed.dateDelivrance);
   let dateExpiration = mrzDecoded.dateExpiration || normaliserDate(parsed.dateExpiration);
@@ -175,19 +244,22 @@ const validerEtCorrigerDonnees = (parsed) => {
     numeroPiece,
     nin,
     codePays: parsed.codePays ? String(parsed.codePays).toUpperCase().trim() : 'SEN',
-    typePiece: parsed.typePiece || 'CARTE_IDENTITE_CEDEAO',
+    typePiece,
     dateDelivrance,
     dateExpiration,
     centreEnregistrement: parsed.centreEnregistrement ? String(parsed.centreEnregistrement).trim() : null,
     adresseDomicile: parsed.adresseDomicile ? String(parsed.adresseDomicile).trim() : null,
     nationalite: parsed.nationalite ? String(parsed.nationalite).trim() : null,
-    numeroElecteur: parsed.numeroElecteur ? String(parsed.numeroElecteur).trim() : null,
-    region: parsed.region ? String(parsed.region).trim() : null,
-    departement: parsed.departement ? String(parsed.departement).trim() : null,
-    arrondissement: parsed.arrondissement ? String(parsed.arrondissement).trim() : null,
-    commune: parsed.commune ? String(parsed.commune).trim() : null,
-    lieuDeVote: parsed.lieuDeVote ? String(parsed.lieuDeVote).trim() : null,
-    bureauDeVote: parsed.bureauDeVote ? String(parsed.bureauDeVote).trim() : null,
+
+    // Champs Carte Grise
+    immatriculation: parsed.immatriculation || (typePiece === 'CARTE_GRISE' ? numeroPiece : null),
+    marque: parsed.marque ? String(parsed.marque).trim() : null,
+    modele: parsed.modele ? String(parsed.modele).trim() : null,
+    couleur: parsed.couleur ? String(parsed.couleur).trim() : null,
+    typeVehicule: parsed.typeVehicule ? String(parsed.typeVehicule).trim() : null,
+
+    // Champs Permis
+    categoriesPermis: parsed.categoriesPermis ? String(parsed.categoriesPermis).trim() : null,
 
     // Alias bilingues
     lastName: nom,
@@ -198,7 +270,7 @@ const validerEtCorrigerDonnees = (parsed) => {
     height: parseTailleCentimetres(parsed.taille),
     documentNumber: numeroPiece,
     idNumber: nin,
-    documentType: parsed.typePiece || 'CARTE_IDENTITE_CEDEAO',
+    documentType: typePiece,
     issuedAt: dateDelivrance,
     expiresAt: dateExpiration,
     issuer: parsed.centreEnregistrement ? String(parsed.centreEnregistrement).trim() : null,
@@ -208,43 +280,8 @@ const validerEtCorrigerDonnees = (parsed) => {
   };
 };
 
-const responseSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    nom: { 
-      type: SchemaType.STRING, 
-      description: "Nom de famille (SURNAME) imprimé sur la ligne 'Nom / Surname'. Ex: MENDY, DIOP, SOW." 
-    },
-    prenom: { 
-      type: SchemaType.STRING, 
-      description: "Prénom(s) (GIVEN NAMES) imprimé(s) sur la ligne 'Prénom(s) / Given Names'. Ex: MILINDA." 
-    },
-    dateNaissance: { 
-      type: SchemaType.STRING, 
-      description: "Date de naissance au format YYYY-MM-DD sur la ligne 'Date de naissance'." 
-    },
-    lieuNaissance: { 
-      type: SchemaType.STRING, 
-      description: "Ville/Commune de naissance sur la ligne 'Lieu de naissance'. Ex: DAKAR." 
-    },
-    sexe: { type: SchemaType.STRING },
-    taille: { type: SchemaType.STRING },
-    numeroPiece: { type: SchemaType.STRING, description: "Numéro de pièce ou N° CNI" },
-    nin: { type: SchemaType.STRING, description: "Numéro d'Identification National (NIN)" },
-    codePays: { type: SchemaType.STRING },
-    typePiece: { type: SchemaType.STRING },
-    dateDelivrance: { type: SchemaType.STRING },
-    dateExpiration: { type: SchemaType.STRING },
-    centreEnregistrement: { type: SchemaType.STRING },
-    adresseDomicile: { type: SchemaType.STRING },
-    mrzLine1: { type: SchemaType.STRING, description: "1ère ligne MRZ au bas de la carte (ex: I<SEN17511994012344<<<<<<<<<<<<<)" },
-    mrzLine2: { type: SchemaType.STRING, description: "2ème ligne MRZ au bas de la carte (ex: 9410189M2609267SEN<<<<<<<<<<<8)" },
-    mrzLine3: { type: SchemaType.STRING, description: "3ème ligne MRZ au bas de la carte (ex: MENDY<<MILINDA<<<<<<<<<<<<<<<<<)" },
-  },
-};
-
 /**
- * Analyse 100% exacte avec Google Gemini Vision et boucle de secours multi-modèles
+ * Analyse 100% exacte avec Google Gemini Vision pour TOUS types de documents d'identité
  */
 const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -275,7 +312,7 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // ACCÉLÉRATION SOUS-SECONDE (< 0.5s) : Prétraitement Sharp uniquement pour les grandes images (> 500 KB)
+  // Prétraitement Sharp si image volumineuse
   if (mimeType !== 'application/pdf' && buffer.length > 500 * 1024) {
     try {
       buffer = await sharp(buffer)
@@ -297,20 +334,46 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un système OCR d'ultra-précision pour cartes d'identité CNI CEDEAO Sénégal / Afrique de l'Ouest, Passeports, Permis de Conduire, Cartes Grises et Cartes de Séjour.
+  const promptSysteme = `Tu es un système OCR universel d'ultra-précision spécialisé dans l'analyse de documents officiels :
+- Cartes d'Identité (CNI / CIN CEDEAO, Sénégal, France, Afrique de l'Ouest, etc.)
+- Passeports (Nationaux et Internationaux)
+- Permis de Conduire
+- Cartes Grises (Certificats d'immatriculation de véhicules)
+- Cartes Consulaires
+- Cartes de Séjour / Titres de séjour / Residence Permits
 
-EXAMINE ET EXTRAIS SANS ERREUR :
-1. **nom** : Le Nom de famille exact imprimé sur la ligne "Nom / Surname" (ex: "MENDY", "DIOP", "SOW"). Ne mets jamais le prénom !
-2. **prenom** : Le ou les Prénom(s) exacts imprimés sur la ligne "Prénom(s) / Given Names" (ex: "MILINDA"). Ne mets jamais le nom de famille !
-3. **dateNaissance** : La date de naissance au format "YYYY-MM-DD" (ex: "1994-10-18").
-4. **lieuNaissance** : La ville de naissance (ex: "DAKAR").
-5. **numeroPiece** : Le numéro officiel de la pièce (N° CNI / ID Card No).
-6. **nin** : Le Numéro d'Identification National à 13 ou 14 chiffres.
-7. **mrzLine1** : La 1ère ligne MRZ au bas de la carte si présente.
-8. **mrzLine2** : La 2ème ligne MRZ au bas de la carte si présente.
-9. **mrzLine3** : La 3ème ligne MRZ au bas de la carte si présente.`;
+CONSIGNES D'EXTRACTION STRICTES SELON LE TYPE DE DOCUMENT DÉTECTÉ :
 
-  // Modèle actif certifié pour votre clé API (réponse sous-seconde < 0.8s)
+1. **DÉTERMINER typePiece** :
+   - 'CNI' pour Carte d'Identité Nationale / CNI CEDEAO.
+   - 'PASSEPORT' pour tout passeport.
+   - 'PERMIS' pour un permis de conduire.
+   - 'CARTE_GRISE' pour une carte grise / certificat d'immatriculation.
+   - 'CARTE_CONSULAIRE' pour une carte consulaire.
+   - 'CARTE_SEJOUR' pour un titre / carte de séjour.
+
+2. **POUR PASSEPORT, CNI, PERMIS, CARTE CONSULAIRE & CARTE DE SÉJOUR** :
+   - **nom** : Nom de famille exact (SURNAME). Ne jamais inclure le prénom !
+   - **prenom** : Prénom(s) exacts (GIVEN NAMES). Ne jamais inclure le nom !
+   - **dateNaissance** : Format YYYY-MM-DD.
+   - **lieuNaissance** : Ville/Lieu de naissance.
+   - **numeroPiece** : Numéro officiel du document (N° CNI, N° Passeport, N° Permis, N° Titre de Séjour, N° Carte Consulaire).
+   - **nin** : Numéro d'Identification National à 13-14 chiffres si présent.
+   - **dateDelivrance** et **dateExpiration** : Format YYYY-MM-DD.
+   - **sexe** ('M' ou 'F') et **taille** (en cm).
+   - **nationalite** : Pays d'origine/nationalité.
+   - **centreEnregistrement** : Consulat/Ambassade/Préfecture émettrice.
+   - **mrzLine1**, **mrzLine2**, **mrzLine3** : Les lignes MRZ au bas du document si présentes.
+
+3. **POUR CARTE GRISE / VÉHICULE** :
+   - **immatriculation** : Numéro de plaque d'immatriculation (ex: "DK-1234-AB", "1234 AB 01").
+   - **numeroPiece** : Mettre l'immatriculation du véhicule.
+   - **marque** : Marque du véhicule (ex: Toyota, Peugeot, Renault, Mitsubishi).
+   - **modele** : Modèle (ex: Hilux, Corolla, Duster, Canter).
+   - **couleur** : Couleur du véhicule si mentionnée (ex: Blanc, Gris, Noir).
+   - **typeVehicule** : Genre du véhicule (ex: Voiture, Camion, Moto, Bus).
+   - **nom** et **prenom** : Nom et Prénom du titulaire du véhicule si indiqués.`;
+
   const MODES_GEMINI = [
     'gemini-3.5-flash',
     'gemini-3.1-flash-lite',
@@ -339,7 +402,7 @@ EXAMINE ET EXTRAIS SANS ERREUR :
       }
 
       const parsedData = JSON.parse(responseText);
-      console.log(`✅ Extraction Gemini réussie avec le modèle ${modelName}`);
+      console.log(`✅ Extraction Gemini réussie pour type ${parsedData.typePiece || 'Inconnu'} avec ${modelName}`);
       return validerEtCorrigerDonnees(parsedData);
     } catch (err) {
       lastError = err;
