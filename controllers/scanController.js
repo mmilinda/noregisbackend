@@ -87,7 +87,8 @@ const scannerImage = async (req, res) => {
         console.error('⚠️ Échec de l\'extraction Gemini Vision :', geminiErr.message);
       }
     } else {
-      console.warn('⚠️ GEMINI_API_KEY absente du process.env (Vérifiez les variables d\'environnement Vercel)');
+      geminiErrorMessage = 'La clé GEMINI_API_KEY est absente des variables d\'environnement du serveur.';
+      console.warn('⚠️ GEMINI_API_KEY absente du process.env');
     }
 
     // Priorité 2 : OpenAI Vision (Secours si configuré)
