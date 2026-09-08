@@ -1,3 +1,5 @@
+const { Visiteur, Visite, Document } = require('../models');
+
 /**
  * Construit un regex flexible pour faire correspondre les numéros de téléphone
  * peu importe les espaces, tirets ou indicatifs (+221, 00221, etc.)
