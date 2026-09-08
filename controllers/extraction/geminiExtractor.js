@@ -403,9 +403,10 @@ Tu DOIS répondre EXCLUSIVEMENT sous la forme d'un objet JSON valide respectant 
 }`;
 
   const MODES_GEMINI = [
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b'
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
+    'gemini-flash-latest'
   ];
 
   let lastError = null;
