@@ -14,39 +14,46 @@ const construireRegexTelephone = (queryTel) => {
 };
 
 /**
- * Recherche un visiteur existant par son NIN (Numéro d'Identification National) ou numéro de pièce
+ * Recherche un visiteur existant par son NIN (Numéro d'Identification National) ou numéro de pièce.
+ * Supporte la saisie partielle dès les premiers chiffres pour affichage en liste déroulante / autocomplétion.
  */
 const rechercherParNIN = async (req, res) => {
   try {
     const queryNin = req.query.nin || req.query.q || req.query.telephone || req.query.phone;
-    if (!queryNin) {
-      return res.status(400).json({ success: false, message: 'Le NIN est requis.' });
+    if (!queryNin || !String(queryNin).trim()) {
+      return res.status(400).json({ success: false, message: 'Le NIN est requis.', visiteurs: [] });
     }
 
     const rawQuery = String(queryNin).trim();
     const digitsOnly = rawQuery.replace(/\D/g, '');
 
+    const regexPattern = digitsOnly.length > 0
+      ? digitsOnly.split('').join('[\\s.-]*')
+      : rawQuery;
+
     const filtre = {
       $or: [
-        { nin: rawQuery },
-        ...(digitsOnly.length >= 5 ? [{ nin: { $regex: digitsOnly, $options: 'i' } }] : []),
-        { numeroPiece: rawQuery }
+        { nin: { $regex: regexPattern, $options: 'i' } },
+        { nin: { $regex: rawQuery, $options: 'i' } },
+        { numeroPiece: { $regex: rawQuery, $options: 'i' } },
       ]
     };
 
-    const visiteur = await Visiteur.findOne(filtre);
+    const visiteurs = await Visiteur.find(filtre).sort({ createdAt: -1 }).limit(10);
 
-    if (!visiteur) {
+    if (!visiteurs || visiteurs.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Aucun visiteur trouvé avec ce NIN.'
+        message: 'Aucun visiteur trouvé avec ce NIN.',
+        visiteurs: []
       });
     }
 
     return res.json({
       success: true,
-      message: 'Visiteur existant trouvé dans la base de données.',
-      visiteur
+      message: 'Visiteur(s) existant(s) trouvé(s) dans la base de données.',
+      visiteur: visiteurs[0],
+      visiteurs
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
