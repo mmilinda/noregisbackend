@@ -4,6 +4,32 @@ const Utilisateur = require('../models/Utilisateur');
 // Champs de profil éditables (sauf mot de passe et role qui ont leurs propres endpoints)
 const PROFILE_FIELDS = ['nom', 'prenom', 'telephone', 'departement', 'poste', 'niveauAccreditation', 'dateArrivee'];
 
+const helperGenererReponseAuth = (utilisateur, message = 'Connexion réussie.') => {
+  const token = jwt.sign(
+    { id: utilisateur._id, role: utilisateur.role },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '2h' }
+  );
+  return {
+    success: true,
+    message,
+    token,
+    utilisateur: {
+      id: utilisateur._id,
+      nom: utilisateur.nom,
+      prenom: utilisateur.prenom,
+      email: utilisateur.email,
+      role: utilisateur.role,
+      telephone: utilisateur.telephone,
+      departement: utilisateur.departement,
+      poste: utilisateur.poste,
+      niveauAccreditation: utilisateur.niveauAccreditation,
+      dateArrivee: utilisateur.dateArrivee,
+      createdAt: utilisateur.createdAt,
+    },
+  };
+};
+
 const login = async (req, res) => {
   try {
     const { email, motDePasse } = req.body;
@@ -21,28 +47,84 @@ const login = async (req, res) => {
     if (!motDePasseValide) {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects.' });
     }
-    const token = jwt.sign(
-      { id: utilisateur._id, role: utilisateur.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
+
+    if (utilisateur.is2FAEnabled) {
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      utilisateur.otpCode = otpCode;
+      utilisateur.otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+      await utilisateur.save();
+
+      return res.json({
+        success: true,
+        require2FA: true,
+        userId: utilisateur._id,
+        email: utilisateur.email,
+        message: 'Un code de vérification à 6 chiffres a été généré.',
+        otpPreview: otpCode,
+      });
+    }
+
+    res.json(helperGenererReponseAuth(utilisateur));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+const verifier2FA = async (req, res) => {
+  try {
+    const { userId, code } = req.body;
+    if (!userId || !code) {
+      return res.status(400).json({ success: false, message: 'Identifiant utilisateur et code requis.' });
+    }
+
+    const utilisateur = await Utilisateur.findById(userId);
+    if (!utilisateur) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable.' });
+    }
+
+    if (!utilisateur.otpCode || !utilisateur.otpExpiresAt) {
+      return res.status(400).json({ success: false, message: 'Aucun code de vérification en attente.' });
+    }
+
+    if (new Date() > new Date(utilisateur.otpExpiresAt)) {
+      return res.status(400).json({ success: false, message: 'Le code de vérification a expiré.' });
+    }
+
+    if (utilisateur.otpCode !== String(code).trim()) {
+      return res.status(400).json({ success: false, message: 'Code de vérification incorrect.' });
+    }
+
+    utilisateur.otpCode = null;
+    utilisateur.otpExpiresAt = null;
+    await utilisateur.save();
+
+    res.json(helperGenererReponseAuth(utilisateur, 'Authentification 2FA réussie.'));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+const renvoyer2FA = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Identifiant utilisateur requis.' });
+    }
+
+    const utilisateur = await Utilisateur.findById(userId);
+    if (!utilisateur) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable.' });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    utilisateur.otpCode = otpCode;
+    utilisateur.otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await utilisateur.save();
+
     res.json({
       success: true,
-      message: 'Connexion réussie.',
-      token,
-      utilisateur: {
-        id: utilisateur._id,
-        nom: utilisateur.nom,
-        prenom: utilisateur.prenom,
-        email: utilisateur.email,
-        role: utilisateur.role,
-        telephone: utilisateur.telephone,
-        departement: utilisateur.departement,
-        poste: utilisateur.poste,
-        niveauAccreditation: utilisateur.niveauAccreditation,
-        dateArrivee: utilisateur.dateArrivee,
-        createdAt: utilisateur.createdAt,
-      },
+      message: 'Un nouveau code de vérification a été généré.',
+      otpPreview: otpCode,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -180,4 +262,4 @@ const genererQrAgent = async (req, res) => {
   }
 };
 
-module.exports = { login, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent };
+module.exports = { login, verifier2FA, renvoyer2FA, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent };

@@ -13,6 +13,10 @@ const utilisateurSchema = new mongoose.Schema({
   poste:               { type: String, maxlength: 100, default: '' },
   niveauAccreditation: { type: String, maxlength: 50, default: '' },
   dateArrivee:         { type: Date, default: null },
+  is2FAEnabled:        { type: Boolean, default: true },
+  twoFactorSecret:     { type: String, default: null },
+  otpCode:             { type: String, default: null },
+  otpExpiresAt:        { type: Date, default: null },
 }, { timestamps: true });
 
 utilisateurSchema.pre('save', async function (next) {
