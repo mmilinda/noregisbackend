@@ -8,7 +8,7 @@ const {
   modifierVisiteur,
   supprimerVisiteur
 } = require('../controllers/visiteurController');
-const { authentifier } = require('../middleware/auth');
+const { authentifier, estAdmin } = require('../middleware/auth');
 
 router.use(authentifier);
 
@@ -18,6 +18,6 @@ router.get('/', listerVisiteurs);
 router.post('/', creerVisiteur);
 router.get('/:id', getVisiteur);
 router.put('/:id', modifierVisiteur);
-router.delete('/:id', supprimerVisiteur);
+router.delete('/:id', estAdmin, supprimerVisiteur);
 
 module.exports = router;

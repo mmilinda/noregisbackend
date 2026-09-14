@@ -5,9 +5,9 @@ const {
   enregistrerSortie,
   listerVisites,
   visitesEnCours,
-  supprimerVisite               // 👈 import de la nouvelle fonction
+  supprimerVisite
 } = require('../controllers/visiteController');
-const { authentifier } = require('../middleware/auth');
+const { authentifier, estAdmin } = require('../middleware/auth');
 
 router.use(authentifier);
 
@@ -15,6 +15,6 @@ router.get('/', listerVisites);
 router.get('/en-cours', visitesEnCours);
 router.post('/entree', enregistrerEntree);
 router.post('/sortie/:id', enregistrerSortie);
-router.delete('/:id', supprimerVisite);   // 👈 route DELETE pour supprimer une visite
+router.delete('/:id', estAdmin, supprimerVisite);
 
 module.exports = router;
