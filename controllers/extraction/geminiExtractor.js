@@ -193,19 +193,32 @@ const validerEtCorrigerDonnees = (parsed) => {
   }
 
   // 2. Identification du type de pièce
-  let typePiece = parsed.typePiece || 'CNI';
-  const rawTextUpper = JSON.stringify(parsed).toUpperCase();
+  let typePiece = (parsed.typePiece || '').toUpperCase().trim();
+  const validTypes = ['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_GRISE', 'CARTE_CONSULAIRE', 'CARTE_SEJOUR'];
 
-  if (mrzRaw.startsWith('P<') || rawTextUpper.includes('PASSPORT') || rawTextUpper.includes('PASSEPORT')) {
+  // Signaux MRZ prioritaires
+  if (mrzRaw.startsWith('P<')) {
     typePiece = 'PASSEPORT';
-  } else if (rawTextUpper.includes('PERMIS DE CONDUIRE') || rawTextUpper.includes('DRIVING LICENCE') || parsed.categoriesPermis) {
-    typePiece = 'PERMIS';
-  } else if (rawTextUpper.includes('CARTE GRISE') || rawTextUpper.includes('IMMATRICULATION') || parsed.immatriculation || parsed.marque) {
-    typePiece = 'CARTE_GRISE';
-  } else if (rawTextUpper.includes('CONSULAIRE') || rawTextUpper.includes('CONSULAR')) {
-    typePiece = 'CARTE_CONSULAIRE';
-  } else if (rawTextUpper.includes('SÉJOUR') || rawTextUpper.includes('SEJOUR') || rawTextUpper.includes('RESIDENCE PERMIT')) {
-    typePiece = 'CARTE_SEJOUR';
+  } else if (mrzRaw.startsWith('I<') || mrzRaw.startsWith('ID<') || mrzRaw.startsWith('A<')) {
+    typePiece = 'CNI';
+  }
+
+  // Si typePiece est vide ou invalide, déduire rigoureusement sans inspecter le JSON complet
+  if (!validTypes.includes(typePiece)) {
+    if (parsed.categoriesPermis) {
+      typePiece = 'PERMIS';
+    } else if (parsed.marque && parsed.immatriculation) {
+      typePiece = 'CARTE_GRISE';
+    } else {
+      typePiece = 'CNI';
+    }
+  }
+
+  // Sécurité anti-faux positif : Si le document comporte des attributs de personne (NIN, lieu naissance, etc.)
+  // ou si 'marque' est absent, il ne s'agit PAS d'une Carte Grise même si centreEnregistrement mentionne 'immatriculation'.
+  const isPersonDoc = !!(parsed.nin || parsed.taille || parsed.lieuNaissance || mrzDecoded.nin || mrzRaw.length > 10 || parsed.categoriesPermis);
+  if (isPersonDoc && typePiece === 'CARTE_GRISE' && !parsed.marque) {
+    typePiece = 'CNI';
   }
 
   // 3. NIN & Numéro de pièce
@@ -215,7 +228,7 @@ const validerEtCorrigerDonnees = (parsed) => {
   let nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
   if (nin && nin.length < 8) nin = null;
 
-  let numeroPiece = mrzDecoded.numeroPiece || parsed.immatriculation || nettoyerNumeroPiece(parsed.numeroPiece) || nin;
+  let numeroPiece = mrzDecoded.numeroPiece || nettoyerNumeroPiece(parsed.numeroPiece) || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null) || nin;
 
   // 4. Normalisation des dates
   let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
@@ -234,6 +247,8 @@ const validerEtCorrigerDonnees = (parsed) => {
     dateExpiration = tmp;
   }
 
+  const isVehicle = typePiece === 'CARTE_GRISE';
+
   return {
     nom,
     prenom,
@@ -251,12 +266,12 @@ const validerEtCorrigerDonnees = (parsed) => {
     adresseDomicile: parsed.adresseDomicile ? String(parsed.adresseDomicile).trim() : null,
     nationalite: parsed.nationalite ? String(parsed.nationalite).trim() : null,
 
-    // Champs Carte Grise
-    immatriculation: parsed.immatriculation || (typePiece === 'CARTE_GRISE' ? numeroPiece : null),
-    marque: parsed.marque ? String(parsed.marque).trim() : null,
-    modele: parsed.modele ? String(parsed.modele).trim() : null,
-    couleur: parsed.couleur ? String(parsed.couleur).trim() : null,
-    typeVehicule: parsed.typeVehicule ? String(parsed.typeVehicule).trim() : null,
+    // Champs Carte Grise (uniquement si le document est réellement une Carte Grise)
+    immatriculation: isVehicle ? (parsed.immatriculation || numeroPiece) : null,
+    marque: isVehicle ? (parsed.marque ? String(parsed.marque).trim() : null) : null,
+    modele: isVehicle ? (parsed.modele ? String(parsed.modele).trim() : null) : null,
+    couleur: isVehicle ? (parsed.couleur ? String(parsed.couleur).trim() : null) : null,
+    typeVehicule: isVehicle ? (parsed.typeVehicule ? String(parsed.typeVehicule).trim() : null) : null,
 
     // Champs Permis
     categoriesPermis: parsed.categoriesPermis ? String(parsed.categoriesPermis).trim() : null,
