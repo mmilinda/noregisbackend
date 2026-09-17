@@ -211,11 +211,12 @@ const validerEtCorrigerDonnees = (parsed) => {
     typePiece = 'CNI';
   }
 
-  // Si typePiece est vide ou invalide, déduire rigoureusement sans inspecter le JSON complet
-  if (!validTypes.includes(typePiece)) {
-    if (parsed.categoriesPermis) {
-      typePiece = 'PERMIS';
-    } else if (parsed.marque && parsed.immatriculation) {
+  // Signal Permis prioritaire si catégories ou mots-clés présents
+  const isPermis = !!(parsed.categoriesPermis || typePiece.includes('PERMIS') || typePiece.includes('DRIVER') || typePiece.includes('CONDUIRE'));
+  if (isPermis) {
+    typePiece = 'PERMIS';
+  } else if (!validTypes.includes(typePiece)) {
+    if (parsed.marque && parsed.immatriculation) {
       typePiece = 'CARTE_GRISE';
     } else {
       typePiece = 'CNI';
@@ -226,7 +227,7 @@ const validerEtCorrigerDonnees = (parsed) => {
   // ou si 'marque' est absent, il ne s'agit PAS d'une Carte Grise même si centreEnregistrement mentionne 'immatriculation'.
   const isPersonDoc = !!(parsed.nin || parsed.taille || parsed.lieuNaissance || mrzDecoded.nin || mrzRaw.length > 10 || parsed.categoriesPermis);
   if (isPersonDoc && typePiece === 'CARTE_GRISE' && !parsed.marque) {
-    typePiece = 'CNI';
+    typePiece = isPermis ? 'PERMIS' : 'CNI';
   }
 
   // 3. NIN & Numéro de pièce
@@ -236,7 +237,8 @@ const validerEtCorrigerDonnees = (parsed) => {
   let nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
   if (nin && nin.length < 8) nin = null;
 
-  let numeroPiece = nettoyerNumeroPiece(parsed.numeroPiece) || mrzDecoded.mrzNumeroPiece || mrzDecoded.numeroPiece || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null) || nin;
+  let rawNum = parsed.numeroPiece || parsed.numeroPermis || parsed.documentNumber || parsed.cardNumber;
+  let numeroPiece = nettoyerNumeroPiece(rawNum) || mrzDecoded.mrzNumeroPiece || mrzDecoded.numeroPiece || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null) || nin;
 
   // 4. Normalisation des dates
   let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
@@ -335,13 +337,13 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // Prétraitement Sharp si image volumineuse
-  if (mimeType !== 'application/pdf' && buffer.length > 500 * 1024) {
+  // Prétraitement Sharp si image volumineuse (optimisation vitesse & lisibilité)
+  if (mimeType !== 'application/pdf' && buffer.length > 300 * 1024) {
     try {
       buffer = await sharp(buffer)
         .rotate()
-        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
-        .jpeg({ quality: 80 })
+        .resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
+        .jpeg({ quality: 78 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
@@ -369,12 +371,13 @@ CONSIGNES PARTICULIÈRES EXTRACTION PAR DOCUMENT :
 
 1. **PERMIS DE CONDUIRE** :
    - typePiece: "PERMIS"
-   - numeroPiece: Numéro du permis (généralement champ "5." ou "N° PERMIS" ou "N° DE PERMIS").
-   - nom: Nom de famille (champ "1." ou SURNAME).
-   - prenom: Prénom(s) (champ "2." ou GIVEN NAMES).
-   - dateNaissance & lieuNaissance: champ "3." (date au format YYYY-MM-DD).
-   - dateDelivrance: champ "4a." (YYYY-MM-DD).
-   - dateExpiration: champ "4b." (YYYY-MM-DD).
+   - numeroPiece: Numéro du permis de conduire (champ "5.", "N° PERMIS", "N° DE PERMIS", "LICENCE NO", ou suite alphanumérique principale).
+   - nom: Nom de famille du titulaire (champ "1." ou SURNAME / NOM).
+   - prenom: Prénom(s) du titulaire (champ "2." ou GIVEN NAMES / PRÉNOM).
+   - dateNaissance: Date de naissance (champ "3.", format YYYY-MM-DD).
+   - lieuNaissance: Lieu / Ville de naissance (champ "3." ou POB).
+   - dateDelivrance: Date de délivrance / émission (champ "4a.", format YYYY-MM-DD).
+   - dateExpiration: Date d'expiration / fin de validité (champ "4b.", format YYYY-MM-DD).
    - centreEnregistrement: Préfecture / Ministère / Autorité émettrice (champ "4c.").
    - categoriesPermis: Catégories autorisées (champ "9.", ex: "A", "B", "C", "D", "A, B, C1").
 
@@ -423,10 +426,9 @@ Tu DOIS répondre EXCLUSIVEMENT sous la forme d'un objet JSON valide respectant 
 }`;
 
   const MODES_GEMINI = [
-    'gemini-3.5-flash-lite',
-    'gemini-3.5-flash',
     'gemini-1.5-flash',
-    'gemini-flash-latest'
+    'gemini-2.0-flash',
+    'gemini-1.5-pro'
   ];
 
   let lastError = null;
