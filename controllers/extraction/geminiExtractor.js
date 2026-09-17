@@ -14,41 +14,47 @@ const getMimeType = (filePath) => {
 };
 
 /**
- * Normalise les dates sous forme de chaîne YYYY-MM-DD
+ * Normalise les dates sous forme de chaîne YYYY-MM-DD (extrait les dates de n'importe quel texte brut)
  */
 const normaliserDate = (valeur) => {
   if (!valeur || typeof valeur !== 'string') return null;
   const str = valeur.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  const matchFr = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
-  if (matchFr) {
-    const [, d, m, y] = matchFr;
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-  const matchIso = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  
+  // match YYYY-MM-DD n'importe où dans la chaîne
+  const matchIso = str.match(/\b(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})\b/);
   if (matchIso) {
     const [, y, m, d] = matchIso;
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
-  return str;
+
+  // match DD/MM/YYYY n'importe où dans la chaîne
+  const matchFr = str.match(/\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/);
+  if (matchFr) {
+    const [, d, m, y] = matchFr;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  return null;
 };
 
 /**
- * Nettoie les numéros de pièce et NIN
+ * Nettoie les numéros de pièce et NIN (retire les préfixes 5. N° PERMIS etc.)
  */
 const nettoyerNumeroPiece = (valeur) => {
   if (!valeur) return null;
   let str = String(valeur).trim();
-  str = str.replace(/^(N°\s*DE\s*LA\s*CARTE|N°\s*CNI|N°|CNI|NIN|ID|PASSEPORT|PASSPORT|NUMBER|NUMERO|CARD)\s*:?\s*/i, '');
+  str = str.replace(/^(?:1|2|3|4a|4b|4c|4d|5|6|7|8|9|10|11|12)[\.\s:\-]+/i, '');
+  str = str.replace(/^(N°\s*DE\s*LA\s*CARTE|N°\s*CNI|N°\s*PERMIS|N°\s*DE\s*PERMIS|N°|CNI|NIN|ID|PASSEPORT|PASSPORT|NUMBER|NUMERO|CARD)\s*:?\s*/i, '');
   return str.trim() || null;
 };
 
 /**
- * Nettoie les noms, prénoms et lieux de naissance
+ * Nettoie les noms, prénoms et lieux de naissance (retire les numéros de champs officiels 1., 2., 3., 4c...)
  */
 const nettoyerNomPrenom = (valeur) => {
   if (!valeur) return null;
   let str = String(valeur).trim();
+  str = str.replace(/^(?:1|2|3|4a|4b|4c|4d|5|6|7|8|9|10|11|12)[\.\s:\-]+/i, '');
   str = str.replace(/^(SURNAME|GIVEN\s*NAMES?|NAMES?|NOM|PRENOM|PRÉNOM|NOMS?|PRÉNOMS?|LIEU\s*DE\s*NAISSANCE|PLACE\s*OF\s*BIRTH|A|À|VILLE\s*DE)\s*(\/|\\|\:|-|\s)*\s*/i, '');
   return str.trim() || null;
 };
@@ -230,18 +236,44 @@ const validerEtCorrigerDonnees = (parsed) => {
     typePiece = isPermis ? 'PERMIS' : 'CNI';
   }
 
-  // 3. NIN & Numéro de pièce
-  const allText = `${mrzDecoded.nin || ''} ${parsed.nin || ''} ${parsed.numeroPiece || ''}`;
-  const matchNinChiffres = allText.match(/(?:^|\D)(\d{13,14})(?:\D|$)/);
-  
-  let nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
-  if (nin && nin.length < 8) nin = null;
+  // Traitement combiné Date et Lieu de naissance (champ 3 du Permis)
+  let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
 
+  if (parsed.dateNaissance && (parsed.dateNaissance.includes(' ') || /[a-zA-Z]/.test(parsed.dateNaissance))) {
+    const rawDobStr = String(parsed.dateNaissance).replace(/^[3][\.\s:\-]+/, '').trim();
+    const dateMatch = rawDobStr.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})/);
+    if (dateMatch) {
+      dateNaissance = normaliserDate(dateMatch[1]);
+      const lieuPart = rawDobStr.replace(dateMatch[0], '').replace(/^[\s,:\-\/]+|[\s,:\-\/]+$/g, '').trim();
+      if (!lieuNaissance && lieuPart && lieuPart.length >= 2) {
+        lieuNaissance = nettoyerNomPrenom(lieuPart);
+      }
+    }
+  }
+
+  // 3. NIN & Numéro de pièce
   let rawNum = parsed.numeroPiece || parsed.numeroPermis || parsed.documentNumber || parsed.cardNumber;
-  let numeroPiece = nettoyerNumeroPiece(rawNum) || mrzDecoded.mrzNumeroPiece || mrzDecoded.numeroPiece || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null) || nin;
+  let numeroPiece = nettoyerNumeroPiece(rawNum) || mrzDecoded.mrzNumeroPiece || mrzDecoded.numeroPiece || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null);
+
+  let nin = mrzDecoded.nin;
+  if (!isPermis) {
+    const allText = `${mrzDecoded.nin || ''} ${parsed.nin || ''} ${parsed.numeroPiece || ''}`;
+    const matchNinChiffres = allText.match(/(?:^|\D)(\d{13,14})(?:\D|$)/);
+    nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
+    if (nin && nin.length < 8) nin = null;
+  } else {
+    // Sur un Permis de Conduire, nin est défini SEULEMENT s'il s'agit d'un vrai NIN à 13-14 chiffres distinct du n° de permis
+    if (parsed.nin && parsed.nin !== rawNum) {
+      const cleanNin = String(parsed.nin).replace(/\D/g, '');
+      if (/^\d{13,14}$/.test(cleanNin)) {
+        nin = cleanNin;
+      }
+    }
+  }
+
+  if (!numeroPiece) numeroPiece = nin;
 
   // 4. Normalisation des dates
-  let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
   let dateDelivrance = normaliserDate(parsed.dateDelivrance);
   let dateExpiration = mrzDecoded.dateExpiration || normaliserDate(parsed.dateExpiration);
 
@@ -256,6 +288,8 @@ const validerEtCorrigerDonnees = (parsed) => {
     dateDelivrance = dateExpiration;
     dateExpiration = tmp;
   }
+
+  let centreEnregistrement = nettoyerNomPrenom(parsed.centreEnregistrement);
 
   const isVehicle = typePiece === 'CARTE_GRISE';
 
@@ -272,11 +306,11 @@ const validerEtCorrigerDonnees = (parsed) => {
     typePiece,
     dateDelivrance,
     dateExpiration,
-    centreEnregistrement: parsed.centreEnregistrement ? String(parsed.centreEnregistrement).trim() : null,
+    centreEnregistrement,
     adresseDomicile: parsed.adresseDomicile ? String(parsed.adresseDomicile).trim() : null,
     nationalite: parsed.nationalite ? String(parsed.nationalite).trim() : null,
 
-    // Champs Carte Grise (uniquement si le document est réellement une Carte Grise)
+    // Champs Carte Grise
     immatriculation: isVehicle ? (parsed.immatriculation || numeroPiece) : null,
     marque: isVehicle ? (parsed.marque ? String(parsed.marque).trim() : null) : null,
     modele: isVehicle ? (parsed.modele ? String(parsed.modele).trim() : null) : null,
@@ -284,7 +318,7 @@ const validerEtCorrigerDonnees = (parsed) => {
     typeVehicule: isVehicle ? (parsed.typeVehicule ? String(parsed.typeVehicule).trim() : null) : null,
 
     // Champs Permis
-    categoriesPermis: Array.isArray(parsed.categoriesPermis) ? parsed.categoriesPermis.join(', ') : (parsed.categoriesPermis ? String(parsed.categoriesPermis).trim() : null),
+    categoriesPermis: Array.isArray(parsed.categoriesPermis) ? parsed.categoriesPermis.join(', ') : (parsed.categoriesPermis ? String(parsed.categoriesPermis).replace(/^[9][\.\s:\-]+/, '').trim() : null),
 
     // Alias bilingues
     lastName: nom,
@@ -298,7 +332,7 @@ const validerEtCorrigerDonnees = (parsed) => {
     documentType: typePiece,
     issuedAt: dateDelivrance,
     expiresAt: dateExpiration,
-    issuer: parsed.centreEnregistrement ? String(parsed.centreEnregistrement).trim() : null,
+    issuer: centreEnregistrement,
     address: parsed.adresseDomicile ? String(parsed.adresseDomicile).trim() : null,
 
     formatDetecte: 'GEMINI_VISION',
