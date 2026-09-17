@@ -282,7 +282,7 @@ const validerEtCorrigerDonnees = (parsed) => {
     typeVehicule: isVehicle ? (parsed.typeVehicule ? String(parsed.typeVehicule).trim() : null) : null,
 
     // Champs Permis
-    categoriesPermis: parsed.categoriesPermis ? String(parsed.categoriesPermis).trim() : null,
+    categoriesPermis: Array.isArray(parsed.categoriesPermis) ? parsed.categoriesPermis.join(', ') : (parsed.categoriesPermis ? String(parsed.categoriesPermis).trim() : null),
 
     // Alias bilingues
     lastName: nom,
@@ -357,45 +357,42 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     },
   };
 
-  const promptSysteme = `Tu es un système OCR universel d'ultra-précision spécialisé dans l'analyse de documents officiels :
+  const promptSysteme = `Tu es un système OCR universel d'ultra-précision spécialisé dans l'analyse de tous types de documents officiels (Sénégal, CEDEAO, France, International) :
 - Cartes d'Identité (CNI / CIN CEDEAO, Sénégal, France, Afrique de l'Ouest, etc.)
 - Passeports (Nationaux et Internationaux)
-- Permis de Conduire
+- Permis de Conduire (Format carte plastifiée ou papier, CEDEAO, Sénégal, France, Europe)
 - Cartes Grises (Certificats d'immatriculation de véhicules)
 - Cartes Consulaires
 - Cartes de Séjour / Titres de séjour / Residence Permits
 
-CONSIGNES D'EXTRACTION STRICTES SELON LE TYPE DE DOCUMENT DÉTECTÉ :
+CONSIGNES PARTICULIÈRES EXTRACTION PAR DOCUMENT :
 
-1. **DÉTERMINER typePiece** :
-   - 'CNI' pour Carte d'Identité Nationale / CNI CEDEAO.
-   - 'PASSEPORT' pour tout passeport.
-   - 'PERMIS' pour un permis de conduire.
-   - 'CARTE_GRISE' pour une carte grise / certificat d'immatriculation.
-   - 'CARTE_CONSULAIRE' pour une carte consulaire.
-   - 'CARTE_SEJOUR' pour un titre / carte de séjour.
+1. **PERMIS DE CONDUIRE** :
+   - typePiece: "PERMIS"
+   - numeroPiece: Numéro du permis (généralement champ "5." ou "N° PERMIS" ou "N° DE PERMIS").
+   - nom: Nom de famille (champ "1." ou SURNAME).
+   - prenom: Prénom(s) (champ "2." ou GIVEN NAMES).
+   - dateNaissance & lieuNaissance: champ "3." (date au format YYYY-MM-DD).
+   - dateDelivrance: champ "4a." (YYYY-MM-DD).
+   - dateExpiration: champ "4b." (YYYY-MM-DD).
+   - centreEnregistrement: Préfecture / Ministère / Autorité émettrice (champ "4c.").
+   - categoriesPermis: Catégories autorisées (champ "9.", ex: "A", "B", "C", "D", "A, B, C1").
 
-2. **POUR PASSEPORT, CNI, PERMIS, CARTE CONSULAIRE & CARTE DE SÉJOUR** :
-   - **nom** : Nom de famille exact (SURNAME). Ne jamais inclure le prénom !
-   - **prenom** : Prénom(s) exacts (GIVEN NAMES). Ne jamais inclure le nom !
-   - **dateNaissance** : Format YYYY-MM-DD.
-   - **lieuNaissance** : Ville/Lieu de naissance.
-   - **numeroPiece** : Numéro officiel du document (N° CNI, N° Passeport, N° Permis, N° Titre de Séjour, N° Carte Consulaire).
-   - **nin** : Numéro d'Identification National à 13-14 chiffres si présent.
-   - **dateDelivrance** et **dateExpiration** : Format YYYY-MM-DD.
-   - **sexe** ('M' ou 'F') et **taille** (en cm).
-   - **nationalite** : Pays d'origine/nationalité.
-   - **centreEnregistrement** : Consulat/Ambassade/Préfecture émettrice.
-   - **mrzLine1**, **mrzLine2**, **mrzLine3** : Les lignes MRZ au bas du document si présentes.
+2. **CARTE GRISE / VÉHICULE** :
+   - typePiece: "CARTE_GRISE"
+   - immatriculation: Numéro de plaque (champ "A", ex: "DK-1234-AB").
+   - numeroPiece: Inscrire la plaque d'immatriculation.
+   - marque: Marque du véhicule (champ "D.1", ex: TOYOTA, PEUGEOT).
+   - modele: Modèle (champ "D.3", ex: HILUX, COROLLA).
+   - typeVehicule: Genre du véhicule (champ "J.1" ou Genre, ex: Voiture, Camion, Moto, VP).
+   - couleur: Couleur du véhicule si mentionnée.
+   - nom & prenom: Nom et Prénom du titulaire du véhicule (champ "C.1" ou "C.4.1").
 
-3. **POUR CARTE GRISE / VÉHICULE** :
-   - **immatriculation** : Numéro de plaque d'immatriculation (ex: "DK-1234-AB", "1234 AB 01").
-   - **numeroPiece** : Mettre l'immatriculation du véhicule.
-   - **marque** : Marque du véhicule (ex: Toyota, Peugeot, Renault, Mitsubishi).
-   - **modele** : Modèle (ex: Hilux, Corolla, Duster, Canter).
-   - **couleur** : Couleur du véhicule si mentionnée (ex: Blanc, Gris, Noir).
-   - **typeVehicule** : Genre du véhicule (ex: Voiture, Camion, Moto, Bus).
-   - **nom** et **prenom** : Nom et Prénom du titulaire du véhicule si indiqués.
+3. **PASSEPORT, CNI, CARTE CONSULAIRE & SÉJOUR** :
+   - typePiece: "PASSEPORT", "CNI", "CARTE_CONSULAIRE" ou "CARTE_SEJOUR"
+   - numeroPiece: Numéro officiel du document imprimé en haut (N° PASSEPORT / N° CNI / N° CARTE).
+   - nin: Numéro d'Identification National à 13-14 chiffres si présent.
+   - nom, prenom, dateNaissance (YYYY-MM-DD), lieuNaissance, sexe ("M" ou "F"), taille (en cm), codePays, dateDelivrance, dateExpiration, centreEnregistrement, adresseDomicile, nationalite, mrzLine1, mrzLine2, mrzLine3.
 
 Tu DOIS répondre EXCLUSIVEMENT sous la forme d'un objet JSON valide respectant cette structure exacte :
 {
@@ -428,7 +425,7 @@ Tu DOIS répondre EXCLUSIVEMENT sous la forme d'un objet JSON valide respectant 
   const MODES_GEMINI = [
     'gemini-3.5-flash-lite',
     'gemini-3.5-flash',
-    'gemini-3.6-flash',
+    'gemini-1.5-flash',
     'gemini-flash-latest'
   ];
 
