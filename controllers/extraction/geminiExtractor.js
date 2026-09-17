@@ -90,11 +90,19 @@ const decoderBandeMRZ = (mrzText) => {
       }
     }
 
-    // 2. Ligne NIN / Numéro de pièce MRZ (ex: "I<SEN17511994012344<<<<<<<<<<<<<")
+    // 2. Ligne 2 MRZ Passeport (Format ICAO 9303 TD3 ex: "A012345674SEN9410189M2609267<<<<<<<<<<<8")
+    const matchPassportMrz = line.match(/^([A-Z0-9<]{8,10})\d([A-Z]{3})\d{6}/);
+    if (matchPassportMrz) {
+      const pNum = matchPassportMrz[1].replace(/</g, '').trim();
+      if (pNum && pNum.length >= 6) {
+        res.mrzNumeroPiece = pNum;
+      }
+    }
+
+    // 3. Ligne NIN MRZ (ex: "I<SEN17511994012344<<<<<<<<<<<<<" ou 13-14 chiffres)
     const matchNinMrz = line.match(/(?:[A-Z0-9<]{2,5})(\d{13,14})\d/);
     if (matchNinMrz) {
       res.nin = matchNinMrz[1];
-      res.numeroPiece = matchNinMrz[1];
     }
 
     // 3. Ligne Date Naissance + Sexe + Expiration MRZ (ex: "9410189M2609267SEN<<<<<<<<<<<8")
@@ -228,7 +236,7 @@ const validerEtCorrigerDonnees = (parsed) => {
   let nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
   if (nin && nin.length < 8) nin = null;
 
-  let numeroPiece = mrzDecoded.numeroPiece || nettoyerNumeroPiece(parsed.numeroPiece) || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null) || nin;
+  let numeroPiece = nettoyerNumeroPiece(parsed.numeroPiece) || mrzDecoded.mrzNumeroPiece || mrzDecoded.numeroPiece || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null) || nin;
 
   // 4. Normalisation des dates
   let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
