@@ -378,13 +378,13 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // Prétraitement Sharp si image volumineuse (résolution 1024px optimale pour vitesse ultra-rapide et netteté OCR)
-  if (mimeType !== 'application/pdf' && buffer.length > 150 * 1024) {
+  // Prétraitement Sharp si image volumineuse (résolution 1200px optimale pour netteté maximale et haute vitesse)
+  if (mimeType !== 'application/pdf' && buffer.length > 250 * 1024) {
     try {
       buffer = await sharp(buffer)
         .rotate()
-        .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
-        .jpeg({ quality: 80 })
+        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
+        .jpeg({ quality: 84 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
@@ -408,50 +408,63 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
 - Cartes Consulaires
 - Cartes de Séjour / Titres de séjour / Residence Permits
 
-CONSIGNES PARTICULIÈRES PASSEPORT :
-- typePiece: "PASSEPORT"
-- nom: Nom de famille du titulaire (SURNAME / NOM).
-- prenom: Prénom(s) du titulaire (GIVEN NAMES / PRÉNOMS).
-- numeroPiece: Numéro du passeport (ex: "A01234567").
-- dateNaissance: Date de naissance au format YYYY-MM-DD.
-- lieuNaissance: Lieu de naissance (PLACE OF BIRTH / LIEU DE NAISSANCE).
-- sexe: Sexe ('M' ou 'F').
-- codePays: Code ISO à 3 lettres du pays émetteur (ex: SEN, FRA, CIV, MLI, GIN, GMB).
-- dateDelivrance: Date de délivrance au format YYYY-MM-DD.
-- dateExpiration: Date d'expiration au format YYYY-MM-DD.
-- mrzLine1, mrzLine2: Les 2 lignes MRZ au bas de la page du passeport si visibles.
+CONSIGNES PARTICULIÈRES EXTRACTION PAR DOCUMENT :
 
-CONSIGNES PARTICULIÈRES CARTE NATIONALE D'IDENTITÉ (CNI) :
-- typePiece: "CNI"
-- nom: Nom de famille du titulaire.
-- prenom: Prénom(s) du titulaire.
-- nin: Numéro d'Identification National à 13-14 chiffres (ex: "1751199401234").
-- numeroPiece: Numéro de la carte CNI. Si absent, utiliser le NIN.
-- dateNaissance: Date de naissance au format YYYY-MM-DD.
-- lieuNaissance: Lieu / Ville de naissance.
-- sexe: Sexe ('M' ou 'F').
-- taille: Taille en cm (ex: 175).
-- adresseDomicile: Adresse / Domicile figurant sur la carte.
-- centreEnregistrement: Centre d'enregistrement ou autorité émettrice.
-- dateDelivrance: Date d'émission au format YYYY-MM-DD.
-- dateExpiration: Date d'expiration au format YYYY-MM-DD.
+1. **PERMIS DE CONDUIRE** :
+   - typePiece: "PERMIS"
+   - numeroPiece: Numéro du permis de conduire (champ "5.", "N° PERMIS", "N° DE PERMIS", "LICENCE NO", ou suite alphanumérique principale).
+   - nom: Nom de famille du titulaire (champ "1." ou SURNAME / NOM).
+   - prenom: Prénom(s) du titulaire (champ "2." ou GIVEN NAMES / PRÉNOM).
+   - dateNaissance: Date de naissance (champ "3.", format YYYY-MM-DD).
+   - lieuNaissance: Lieu / Ville de naissance (champ "3." ou POB).
+   - dateDelivrance: Date de délivrance / émission (champ "4a.", format YYYY-MM-DD).
+   - dateExpiration: Date d'expiration / fin de validité (champ "4b.", format YYYY-MM-DD).
+   - centreEnregistrement: Préfecture / Ministère / Autorité émettrice (champ "4c.").
+   - categoriesPermis: Catégories autorisées (champ "9.", ex: "A", "B", "C", "D", "A, B, C1").
 
-CONSIGNES PARTICULIÈRES PERMIS DE CONDUIRE :
-- typePiece: "PERMIS"
-- nom: Nom de famille du titulaire (champ "1." ou SURNAME / NOM). Ne PAS inclure "1.".
-- prenom: Prénom(s) du titulaire (champ "2." ou GIVEN NAMES / PRÉNOM). Ne PAS inclure "2.".
-- dateNaissance: Date de naissance issue du champ "3." au format YYYY-MM-DD.
-- lieuNaissance: Lieu / Ville de naissance issu du champ "3." ou POB.
-- dateDelivrance: Date de délivrance issue du champ "4a." au format YYYY-MM-DD.
-- dateExpiration: Date d'expiration issue du champ "4b." au format YYYY-MM-DD.
-- centreEnregistrement: Autorité émettrice issue du champ "4c.".
-- numeroPiece: Numéro officiel du permis issu du champ "5.". Ne PAS inclure "5.".
-- categoriesPermis: Catégories autorisées issues du champ "9." (ex: "A, B", "B", "C1, D").
+2. **CARTE GRISE / VÉHICULE** :
+   - typePiece: "CARTE_GRISE"
+   - immatriculation: Numéro de plaque (champ "A", ex: "DK-1234-AB").
+   - numeroPiece: Inscrire la plaque d'immatriculation.
+   - marque: Marque du véhicule (champ "D.1", ex: TOYOTA, PEUGEOT).
+   - modele: Modèle (champ "D.3", ex: HILUX, COROLLA).
+   - typeVehicule: Genre du véhicule (champ "J.1" ou Genre, ex: Voiture, Camion, Moto, VP).
+   - couleur: Couleur du véhicule si mentionnée.
+   - nom & prenom: Nom et Prénom du titulaire du véhicule (champ "C.1" ou "C.4.1").
 
-CONSIGNES PARTICULIÈRES CARTE GRISE :
-- typePiece "CARTE_GRISE", immatriculation (champ A), marque (champ D.1), modele (champ D.3), typeVehicule (champ J.1), nom/prenom titulaire.
+3. **PASSEPORT, CNI, CARTE CONSULAIRE & SÉJOUR** :
+   - typePiece: "PASSEPORT", "CNI", "CARTE_CONSULAIRE" ou "CARTE_SEJOUR"
+   - numeroPiece: Numéro officiel du document imprimé en haut (N° PASSEPORT / N° CNI / N° CARTE).
+   - nin: Numéro d'Identification National à 13-14 chiffres si présent.
+   - nom, prenom, dateNaissance (YYYY-MM-DD), lieuNaissance, sexe ("M" ou "F"), taille (en cm), codePays, dateDelivrance, dateExpiration, centreEnregistrement, adresseDomicile, nationalite, mrzLine1, mrzLine2, mrzLine3.
 
-Tu DOIS répondre EXCLUSIVEMENT au format JSON valide respectant le schéma exact fourni.`;
+Tu DOIS répondre EXCLUSIVEMENT sous la forme d'un objet JSON valide respectant cette structure exacte :
+{
+  "typePiece": "CNI" | "PASSEPORT" | "PERMIS" | "CARTE_GRISE" | "CARTE_CONSULAIRE" | "CARTE_SEJOUR",
+  "nom": string | null,
+  "prenom": string | null,
+  "dateNaissance": "YYYY-MM-DD" | null,
+  "lieuNaissance": string | null,
+  "sexe": "M" | "F" | null,
+  "taille": string | null,
+  "numeroPiece": string | null,
+  "nin": string | null,
+  "codePays": string | null,
+  "dateDelivrance": "YYYY-MM-DD" | null,
+  "dateExpiration": "YYYY-MM-DD" | null,
+  "centreEnregistrement": string | null,
+  "adresseDomicile": string | null,
+  "nationalite": string | null,
+  "immatriculation": string | null,
+  "marque": string | null,
+  "modele": string | null,
+  "couleur": string | null,
+  "typeVehicule": string | null,
+  "categoriesPermis": string | null,
+  "mrzLine1": string | null,
+  "mrzLine2": string | null,
+  "mrzLine3": string | null
+}`;
 
   const MODES_GEMINI = [
     'gemini-3.5-flash',
@@ -466,9 +479,7 @@ Tu DOIS répondre EXCLUSIVEMENT au format JSON valide respectant le schéma exac
         model: modelName,
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema,
-          temperature: 0.0,
-          maxOutputTokens: 600,
+          temperature: 0.1,
         },
       });
 
