@@ -3,6 +3,40 @@ const path = require('path');
 const { GoogleGenerativeAI, SchemaType } = require('@google/generative-ai');
 const sharp = require('sharp');
 
+const ISO3_COUNTRY_MAP = {
+  SEN: 'Sénégal',
+  FRA: 'France',
+  GAB: 'Gabon',
+  MLI: 'Mali',
+  CIV: "Côte d'Ivoire",
+  GIN: 'Guinée',
+  GMB: 'Gambie',
+  MRT: 'Mauritanie',
+  TOG: 'Togo',
+  BEN: 'Bénin',
+  BFA: 'Burkina Faso',
+  NER: 'Niger',
+  MAR: 'Maroc',
+  TUN: 'Tunisie',
+  DZA: 'Algérie',
+  CMR: 'Cameroun',
+  COD: 'RDC',
+  COG: 'Congo',
+  GHA: 'Ghana',
+  NGA: 'Nigeria',
+  CPV: 'Cap-Vert',
+  GNB: 'Guinée-Bissau',
+  GNQ: 'Guinée Équatoriale',
+  USA: 'États-Unis',
+  CAN: 'Canada',
+  GBR: 'Royaume-Uni',
+  DEU: 'Allemagne',
+  ESP: 'Espagne',
+  ITA: 'Italie',
+  CHE: 'Suisse',
+  BEL: 'Belgique',
+};
+
 const getMimeType = (filePath) => {
   if (typeof filePath !== 'string') return 'image/jpeg';
   const ext = path.extname(filePath).toLowerCase();
