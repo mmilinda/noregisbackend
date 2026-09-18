@@ -256,7 +256,9 @@ const validerEtCorrigerDonnees = (parsed) => {
   let numeroPiece = nettoyerNumeroPiece(rawNum) || mrzDecoded.mrzNumeroPiece || mrzDecoded.numeroPiece || (typePiece === 'CARTE_GRISE' ? parsed.immatriculation : null);
 
   let nin = mrzDecoded.nin;
-  if (!isPermis) {
+  if (typePiece === 'PASSEPORT') {
+    nin = parsed.nin || mrzDecoded.nin || numeroPiece;
+  } else if (!isPermis) {
     const allText = `${mrzDecoded.nin || ''} ${parsed.nin || ''} ${parsed.numeroPiece || ''}`;
     const matchNinChiffres = allText.match(/(?:^|\D)(\d{13,14})(?:\D|$)/);
     nin = mrzDecoded.nin || (matchNinChiffres ? matchNinChiffres[1] : (parsed.nin ? String(parsed.nin).replace(/\D/g, '') : null));
@@ -291,6 +293,9 @@ const validerEtCorrigerDonnees = (parsed) => {
 
   let centreEnregistrement = nettoyerNomPrenom(parsed.centreEnregistrement);
 
+  const rawCodePays = parsed.codePays ? String(parsed.codePays).toUpperCase().trim() : '';
+  const paysNom = ISO3_COUNTRY_MAP[rawCodePays] || parsed.pays || 'Sénégal';
+
   const isVehicle = typePiece === 'CARTE_GRISE';
 
   return {
@@ -302,7 +307,8 @@ const validerEtCorrigerDonnees = (parsed) => {
     taille: parseTailleCentimetres(parsed.taille),
     numeroPiece,
     nin,
-    codePays: parsed.codePays ? String(parsed.codePays).toUpperCase().trim() : 'SEN',
+    codePays: rawCodePays || 'SEN',
+    pays: paysNom,
     typePiece,
     dateDelivrance,
     dateExpiration,
@@ -330,6 +336,7 @@ const validerEtCorrigerDonnees = (parsed) => {
     documentNumber: numeroPiece,
     idNumber: nin,
     documentType: typePiece,
+    country: paysNom,
     issuedAt: dateDelivrance,
     expiresAt: dateExpiration,
     issuer: centreEnregistrement,
@@ -401,29 +408,55 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
 - Cartes Consulaires
 - Cartes de Séjour / Titres de séjour / Residence Permits
 
+CONSIGNES PARTICULIÈRES PASSEPORT :
+- typePiece: "PASSEPORT"
+- nom: Nom de famille du titulaire (SURNAME / NOM).
+- prenom: Prénom(s) du titulaire (GIVEN NAMES / PRÉNOMS).
+- numeroPiece: Numéro du passeport (ex: "A01234567").
+- dateNaissance: Date de naissance au format YYYY-MM-DD.
+- lieuNaissance: Lieu de naissance (PLACE OF BIRTH / LIEU DE NAISSANCE).
+- sexe: Sexe ('M' ou 'F').
+- codePays: Code ISO à 3 lettres du pays émetteur (ex: SEN, FRA, CIV, MLI, GIN, GMB).
+- dateDelivrance: Date de délivrance au format YYYY-MM-DD.
+- dateExpiration: Date d'expiration au format YYYY-MM-DD.
+- mrzLine1, mrzLine2: Les 2 lignes MRZ au bas de la page du passeport si visibles.
+
+CONSIGNES PARTICULIÈRES CARTE NATIONALE D'IDENTITÉ (CNI) :
+- typePiece: "CNI"
+- nom: Nom de famille du titulaire.
+- prenom: Prénom(s) du titulaire.
+- nin: Numéro d'Identification National à 13-14 chiffres (ex: "1751199401234").
+- numeroPiece: Numéro de la carte CNI. Si absent, utiliser le NIN.
+- dateNaissance: Date de naissance au format YYYY-MM-DD.
+- lieuNaissance: Lieu / Ville de naissance.
+- sexe: Sexe ('M' ou 'F').
+- taille: Taille en cm (ex: 175).
+- adresseDomicile: Adresse / Domicile figurant sur la carte.
+- centreEnregistrement: Centre d'enregistrement ou autorité émettrice.
+- dateDelivrance: Date d'émission au format YYYY-MM-DD.
+- dateExpiration: Date d'expiration au format YYYY-MM-DD.
+
 CONSIGNES PARTICULIÈRES PERMIS DE CONDUIRE :
 - typePiece: "PERMIS"
-- nom: Nom de famille du titulaire (champ "1." ou SURNAME / NOM). Ne PAS inclure le chiffre de champ "1.".
-- prenom: Prénom(s) du titulaire (champ "2." ou GIVEN NAMES / PRÉNOM). Ne PAS inclure le chiffre de champ "2.".
+- nom: Nom de famille du titulaire (champ "1." ou SURNAME / NOM). Ne PAS inclure "1.".
+- prenom: Prénom(s) du titulaire (champ "2." ou GIVEN NAMES / PRÉNOM). Ne PAS inclure "2.".
 - dateNaissance: Date de naissance issue du champ "3." au format YYYY-MM-DD.
-- lieuNaissance: Lieu / Ville de naissance issu du champ "3." ou POB (ex: "DAKAR", "SAINT-LOUIS", "PARIS").
-- dateDelivrance: Date de délivrance / émission issue du champ "4a." au format YYYY-MM-DD.
-- dateExpiration: Date d'expiration / fin de validité issue du champ "4b." au format YYYY-MM-DD.
-- centreEnregistrement: Autorité / Préfecture / Ministère émetteur issu du champ "4c." (ex: "MINISTERE DES TRANSPORTS", "PREFECTURE DE DAKAR").
-- numeroPiece: Numéro officiel unique du permis issu du champ "5." (ex: "140575300123", "SEN-2018-9876"). Ne PAS inclure "5.".
+- lieuNaissance: Lieu / Ville de naissance issu du champ "3." ou POB.
+- dateDelivrance: Date de délivrance issue du champ "4a." au format YYYY-MM-DD.
+- dateExpiration: Date d'expiration issue du champ "4b." au format YYYY-MM-DD.
+- centreEnregistrement: Autorité émettrice issue du champ "4c.".
+- numeroPiece: Numéro officiel du permis issu du champ "5.". Ne PAS inclure "5.".
 - categoriesPermis: Catégories autorisées issues du champ "9." (ex: "A, B", "B", "C1, D").
-- nin: Numéro d'Identification National à 13-14 chiffres si explicitement présent. Si absent ou identique au n° de permis, laisser null.
 
-CONSIGNES PARTICULIÈRES AUTRES DOCUMENTS :
-- CARTE GRISE: typePiece "CARTE_GRISE", immatriculation (champ A), marque (champ D.1), modele (champ D.3), typeVehicule (champ J.1), nom/prenom titulaire.
-- PASSEPORT / CNI / SÉJOUR: typePiece "PASSEPORT" | "CNI" | "CARTE_SEJOUR" | "CARTE_CONSULAIRE", numeroPiece, nin (13-14 chiffres), nom, prenom, dateNaissance, lieuNaissance, sexe, dateDelivrance, dateExpiration.
+CONSIGNES PARTICULIÈRES CARTE GRISE :
+- typePiece "CARTE_GRISE", immatriculation (champ A), marque (champ D.1), modele (champ D.3), typeVehicule (champ J.1), nom/prenom titulaire.
 
 Tu DOIS répondre EXCLUSIVEMENT au format JSON valide respectant le schéma exact fourni.`;
 
   const MODES_GEMINI = [
-    'gemini-1.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-pro'
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
   ];
 
   let lastError = null;
