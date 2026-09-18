@@ -378,13 +378,13 @@ const extraireInfosAvecGemini = async (sourceImage, mimeTypeForm = null) => {
     throw new Error('Le document fourni est vide ou corrompu.');
   }
 
-  // Prétraitement Sharp si image volumineuse (résolution 1400px optimale pour netteté maximale des petits caractères)
-  if (mimeType !== 'application/pdf' && buffer.length > 400 * 1024) {
+  // Prétraitement Sharp si image volumineuse (résolution 1024px optimale pour vitesse ultra-rapide et netteté OCR)
+  if (mimeType !== 'application/pdf' && buffer.length > 150 * 1024) {
     try {
       buffer = await sharp(buffer)
         .rotate()
-        .resize({ width: 1400, height: 1400, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
-        .jpeg({ quality: 88 })
+        .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true, fastShrinkOnLoad: true })
+        .jpeg({ quality: 80 })
         .toBuffer();
       mimeType = 'image/jpeg';
     } catch (sharpErr) {
@@ -456,7 +456,6 @@ Tu DOIS répondre EXCLUSIVEMENT au format JSON valide respectant le schéma exac
   const MODES_GEMINI = [
     'gemini-3.5-flash',
     'gemini-3.6-flash',
-    'gemini-3.5-flash-lite',
   ];
 
   let lastError = null;
@@ -468,7 +467,8 @@ Tu DOIS répondre EXCLUSIVEMENT au format JSON valide respectant le schéma exac
         generationConfig: {
           responseMimeType: 'application/json',
           responseSchema,
-          temperature: 0.1,
+          temperature: 0.0,
+          maxOutputTokens: 600,
         },
       });
 
