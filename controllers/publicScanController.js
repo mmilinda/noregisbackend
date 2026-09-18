@@ -11,15 +11,35 @@ const parseDate = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const cleanSexeVal = (val) => {
+  if (!val) return null;
+  const s = String(val).toUpperCase().trim();
+  if (s === 'M' || s.startsWith('M') || s.includes('HOMME') || s.includes('MASCULIN')) return 'M';
+  if (s === 'F' || s.startsWith('F') || s.includes('FEMME') || s.includes('FEMININ')) return 'F';
+  return null;
+};
+
+const cleanTypePieceVal = (val) => {
+  if (!val) return 'CNI';
+  const tp = String(val).toUpperCase().trim();
+  if (tp.includes('PERMIS') || tp.includes('DRIVER') || tp.includes('CONDUIRE')) return 'PERMIS';
+  if (tp.includes('PASSPORT') || tp.includes('PASSEPORT')) return 'PASSEPORT';
+  if (tp.includes('CONSULAIRE')) return 'CARTE_CONSULAIRE';
+  if (tp.includes('SEJOUR') || tp.includes('SÉJOUR')) return 'CARTE_SEJOUR';
+  if (tp.includes('CEDEAO')) return 'CARTE_IDENTITE_CEDEAO';
+  if (['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE'].includes(tp)) return tp;
+  return 'CNI';
+};
+
 const getVisitorPayload = (data) => ({
   nom: data.nom || data.lastName || data.nomComplet || data.fullName || '',
   prenom: data.prenom || data.firstName || '',
   dateNaissance: parseDate(data.dateNaissance || data.dateDeNaissance || data.birthDate),
   lieuNaissance: data.lieuNaissance || data.birthPlace || '',
-  sexe: data.sexe || data.sex || '',
-  taille: data.taille || data.height || '',
+  sexe: cleanSexeVal(data.sexe || data.sex),
+  taille: data.taille || data.height || null,
   numeroPiece: data.numeroPiece || data.documentNumber || data.idNumber || '',
-  typePiece: data.typePiece || data.documentType || '',
+  typePiece: cleanTypePieceVal(data.typePiece || data.documentType),
   dateDelivrance: parseDate(data.dateDelivrance || data.issuedAt),
   dateExpiration: parseDate(data.dateExpiration || data.expiresAt),
   centreEnregistrement: data.centreEnregistrement || data.issuer || '',

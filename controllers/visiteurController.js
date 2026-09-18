@@ -121,15 +121,33 @@ const creerVisiteur = async (req, res) => {
       });
     }
 
+    let cleanSexe = null;
+    if (sexe) {
+      const s = String(sexe).toUpperCase().trim();
+      if (s === 'M' || s.startsWith('M') || s.includes('HOMME') || s.includes('MASCULIN')) cleanSexe = 'M';
+      else if (s === 'F' || s.startsWith('F') || s.includes('FEMME') || s.includes('FEMININ')) cleanSexe = 'F';
+    }
+
+    let cleanTypePiece = 'CNI';
+    if (typePiece) {
+      const tp = String(typePiece).toUpperCase().trim();
+      if (tp.includes('PERMIS') || tp.includes('DRIVER') || tp.includes('CONDUIRE')) cleanTypePiece = 'PERMIS';
+      else if (tp.includes('PASSPORT') || tp.includes('PASSEPORT')) cleanTypePiece = 'PASSEPORT';
+      else if (tp.includes('CONSULAIRE')) cleanTypePiece = 'CARTE_CONSULAIRE';
+      else if (tp.includes('SEJOUR') || tp.includes('SÉJOUR')) cleanTypePiece = 'CARTE_SEJOUR';
+      else if (tp.includes('CEDEAO')) cleanTypePiece = 'CARTE_IDENTITE_CEDEAO';
+      else if (['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE'].includes(tp)) cleanTypePiece = tp;
+    }
+
     const visiteur = await Visiteur.create({
       nom: nom || 'Visiteur',
       prenom: prenom || 'Anonyme',
       dateNaissance,
       lieuNaissance,
-      sexe,
-      taille,
+      sexe: cleanSexe,
+      taille: (taille && !Number.isNaN(Number(taille))) ? Number(taille) : null,
       numeroPiece: cleanNumPiece,
-      typePiece: typePiece || 'CNI',
+      typePiece: cleanTypePiece,
       dateDelivrance,
       dateExpiration,
       centreEnregistrement,

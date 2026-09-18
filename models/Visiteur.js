@@ -6,7 +6,7 @@ const visiteurSchema = new mongoose.Schema({
   prenom:           { type: String, required: true, maxlength: 100 },
   dateNaissance:    { type: Date, default: null },
   lieuNaissance:    { type: String, maxlength: 100, default: null },
-  sexe:             { type: String, enum: ['M', 'F'], default: null },
+  sexe:             { type: String, enum: ['M', 'F', null], default: null },
   taille:           { type: Number, min: 50, max: 300, default: null },
 
   // Pièce d'identité
@@ -34,7 +34,46 @@ const visiteurSchema = new mongoose.Schema({
   commune:          { type: String, maxlength: 100, default: null },
   lieuDeVote:       { type: String, maxlength: 200, default: null },
   bureauDeVote:     { type: String, maxlength: 50, default: null },
-
 }, { timestamps: true });
+
+visiteurSchema.pre('validate', function(next) {
+  // Normalisation du sexe : Seuls 'M' et 'F' sont acceptés, sinon null (ex: pour Permis où le sexe est absent)
+  if (this.sexe) {
+    const s = String(this.sexe).toUpperCase().trim();
+    if (s === 'M' || s.startsWith('M') || s.includes('HOMME') || s.includes('MASCULIN')) {
+      this.sexe = 'M';
+    } else if (s === 'F' || s.startsWith('F') || s.includes('FEMME') || s.includes('FEMININ')) {
+      this.sexe = 'F';
+    } else {
+      this.sexe = null;
+    }
+  } else {
+    this.sexe = null;
+  }
+
+  // Normalisation du typePiece (ex: "Permis de Conduire" -> "PERMIS")
+  if (this.typePiece) {
+    const tp = String(this.typePiece).toUpperCase().trim();
+    if (tp.includes('PERMIS') || tp.includes('DRIVER') || tp.includes('CONDUIRE')) {
+      this.typePiece = 'PERMIS';
+    } else if (tp.includes('PASSPORT') || tp.includes('PASSEPORT')) {
+      this.typePiece = 'PASSEPORT';
+    } else if (tp.includes('CONSULAIRE')) {
+      this.typePiece = 'CARTE_CONSULAIRE';
+    } else if (tp.includes('SEJOUR') || tp.includes('SÉJOUR')) {
+      this.typePiece = 'CARTE_SEJOUR';
+    } else if (tp.includes('CEDEAO')) {
+      this.typePiece = 'CARTE_IDENTITE_CEDEAO';
+    } else if (!['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE'].includes(tp)) {
+      this.typePiece = 'CNI';
+    } else {
+      this.typePiece = tp;
+    }
+  } else {
+    this.typePiece = 'CNI';
+  }
+
+  if (typeof next === 'function') next();
+});
 
 module.exports = mongoose.model('Visiteur', visiteurSchema);
