@@ -121,11 +121,18 @@ const decoderBandeMRZ = (mrzText) => {
   const lines = clean.split('\n').map(l => l.trim().toUpperCase()).filter(Boolean);
 
   for (const line of lines) {
-    // 1. Ligne Nom / Prénom MRZ (ex: "MENDY<<MILINDA<<<<<<<<<<<<<<<<<")
-    if (line.includes('<<')) {
-      const matchNames = line.match(/^([A-Z0-9]+)<<([A-Z0-9<]+)$/);
+    // 1. Ligne Nom / Prénom MRZ Passeport TD3 / CNI (ex: "P<SENMENDY<<MILINDA<<<<<<<<<<<<<<<<<<")
+    if (line.startsWith('P<') || line.startsWith('I<') || line.startsWith('ID<') || line.startsWith('A<')) {
+      const lineWithoutPrefix = line.replace(/^(P<|I<|ID<|A<)[A-Z]{3}/, '');
+      const nameParts = lineWithoutPrefix.split('<<');
+      if (nameParts.length >= 2) {
+        res.nom = nameParts[0].replace(/</g, ' ').trim();
+        res.prenom = nameParts[1].replace(/</g, ' ').trim();
+      }
+    } else if (line.includes('<<') && !/\d{6}/.test(line) && !/^[A-Z0-9]{8,10}\d[A-Z]{3}/.test(line)) {
+      const matchNames = line.match(/^([A-Z<]+)<<([A-Z<]+)/);
       if (matchNames) {
-        res.nom = matchNames[1].replace(/</g, '').trim();
+        res.nom = matchNames[1].replace(/</g, ' ').trim();
         res.prenom = matchNames[2].replace(/</g, ' ').trim();
       }
     }
@@ -145,7 +152,7 @@ const decoderBandeMRZ = (mrzText) => {
       res.nin = matchNinMrz[1];
     }
 
-    // 3. Ligne Date Naissance + Sexe + Expiration MRZ (ex: "9410189M2609267SEN<<<<<<<<<<<8")
+    // 4. Ligne Date Naissance + Sexe + Expiration MRZ (ex: "9410189M2609267SEN<<<<<<<<<<<8")
     const matchDates = line.match(/(\d{6})\d([MF])(\d{6})/);
     if (matchDates) {
       const [, yymmddBirth, sex, yymmddExp] = matchDates;
@@ -229,8 +236,8 @@ const validerEtCorrigerDonnees = (parsed) => {
   const mrzRaw = `${parsed.mrzLine1 || ''}\n${parsed.mrzLine2 || ''}\n${parsed.mrzLine3 || ''}\n${parsed.mrzText || ''}`;
   const mrzDecoded = decoderBandeMRZ(mrzRaw);
 
-  let nom = mrzDecoded.nom || nettoyerNomPrenom(parsed.nom);
-  let prenom = mrzDecoded.prenom || nettoyerNomPrenom(parsed.prenom);
+  let nom = nettoyerNomPrenom(parsed.nom) || mrzDecoded.nom;
+  let prenom = nettoyerNomPrenom(parsed.prenom) || mrzDecoded.prenom;
   let lieuNaissance = nettoyerNomPrenom(parsed.lieuNaissance);
 
   // Désambiguïsation Nom vs Prénom
@@ -245,7 +252,7 @@ const validerEtCorrigerDonnees = (parsed) => {
   const validTypes = ['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_GRISE', 'CARTE_CONSULAIRE', 'CARTE_SEJOUR'];
 
   // Signaux MRZ prioritaires
-  if (mrzRaw.startsWith('P<')) {
+  if (mrzRaw.startsWith('P<') || mrzRaw.includes('P<') || typePiece.includes('PASSPORT') || typePiece.includes('PASSEPORT')) {
     typePiece = 'PASSEPORT';
   } else if (mrzRaw.startsWith('I<') || mrzRaw.startsWith('ID<') || mrzRaw.startsWith('A<')) {
     typePiece = 'CNI';
@@ -270,8 +277,8 @@ const validerEtCorrigerDonnees = (parsed) => {
     typePiece = isPermis ? 'PERMIS' : 'CNI';
   }
 
-  // Traitement combiné Date et Lieu de naissance (champ 3 du Permis)
-  let dateNaissance = mrzDecoded.dateNaissance || normaliserDate(parsed.dateNaissance);
+  // Traitement combiné Date et Lieu de naissance
+  let dateNaissance = normaliserDate(parsed.dateNaissance) || mrzDecoded.dateNaissance;
 
   if (parsed.dateNaissance && (parsed.dateNaissance.includes(' ') || /[a-zA-Z]/.test(parsed.dateNaissance))) {
     const rawDobStr = String(parsed.dateNaissance).replace(/^[3][\.\s:\-]+/, '').trim();
@@ -501,6 +508,7 @@ Tu DOIS répondre EXCLUSIVEMENT sous la forme d'un objet JSON valide respectant 
 }`;
 
   const MODES_GEMINI = [
+    'gemini-3.5-flash-lite',
     'gemini-3.5-flash',
     'gemini-3.6-flash',
   ];

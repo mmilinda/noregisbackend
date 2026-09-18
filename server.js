@@ -52,6 +52,17 @@ connectDB();
 if (!process.env.VERCEL) {
   server.listen(PORT, () => {
     console.log(`🚀 Serveur démarré avec succès sur http://localhost:${PORT}`);
+
+    // Auto-ping toutes les 10 min pour éviter l'endormissement Render
+    const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://noregisbackend-h9l7.onrender.com';
+    setInterval(() => {
+      const https = require('https');
+      https.get(`${RENDER_URL}/`, (res) => {
+        console.log(`📡 Self-ping Render OK (${res.statusCode})`);
+      }).on('error', (err) => {
+        console.warn('⚠️ Self-ping Render error:', err.message);
+      });
+    }, 10 * 60 * 1000);
   });
 }
 
