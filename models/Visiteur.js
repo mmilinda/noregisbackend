@@ -21,7 +21,17 @@ const visiteurSchema = new mongoose.Schema({
   taille:           { type: Number, min: 50, max: 300, default: null },
 
   // Pièce d'identité
-  numeroPiece:      { type: String, required: true, index: true },
+  numeroPiece:      { 
+    type: String, 
+    required: true, 
+    index: true,
+    set: function(v) {
+      if (!v || !String(v).trim() || String(v).toLowerCase() === 'null' || String(v).toLowerCase() === 'undefined') {
+        return `SP_${Date.now().toString().slice(-6)}`;
+      }
+      return String(v).trim();
+    }
+  },
   nin:              { type: String, maxlength: 50, default: null, index: true },
   codePays:         { type: String, maxlength: 10, default: null },
   typePiece:        { 
@@ -31,19 +41,20 @@ const visiteurSchema = new mongoose.Schema({
       'CARTE_SEJOUR', 'Carte de Séjour', 'Carte de séjour',
       'CARTE_IDENTITE_CEDEAO', 'Carte d\'Identité CEDEAO',
       'CARTE_CONSULAIRE', 'Carte Consulaire',
-      'CARTE_GRISE', 'Carte Grise', 'AUTRE'
+      'CARTE_GRISE', 'Carte Grise', 'SANS_PIECE', 'Sans pièce d\'identité', 'Sans Pièce', 'NO_ID', 'AUTRE'
     ], 
     default: 'CNI',
     set: function(v) {
       if (!v) return 'CNI';
       const tp = String(v).toUpperCase().trim();
+      if (tp.includes('SANS') || tp.includes('NO_ID') || tp.includes('AUCUN')) return 'SANS_PIECE';
       if (tp.includes('PERMIS') || tp.includes('DRIVER') || tp.includes('CONDUIRE')) return 'PERMIS';
       if (tp.includes('PASSPORT') || tp.includes('PASSEPORT')) return 'PASSEPORT';
       if (tp.includes('CONSULAIRE')) return 'CARTE_CONSULAIRE';
       if (tp.includes('SEJOUR') || tp.includes('SÉJOUR')) return 'CARTE_SEJOUR';
       if (tp.includes('CEDEAO')) return 'CARTE_IDENTITE_CEDEAO';
       if (tp.includes('GRISE')) return 'CARTE_GRISE';
-      if (['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE', 'CARTE_GRISE', 'AUTRE'].includes(tp)) return tp;
+      if (['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE', 'CARTE_GRISE', 'SANS_PIECE', 'AUTRE'].includes(tp)) return tp;
       return 'CNI';
     }
   },

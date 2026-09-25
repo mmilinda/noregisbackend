@@ -131,12 +131,14 @@ const creerVisiteur = async (req, res) => {
     let cleanTypePiece = 'CNI';
     if (typePiece) {
       const tp = String(typePiece).toUpperCase().trim();
-      if (tp.includes('PERMIS') || tp.includes('DRIVER') || tp.includes('CONDUIRE')) cleanTypePiece = 'PERMIS';
+      if (tp.includes('SANS') || tp.includes('NO_ID') || tp.includes('AUCUN')) cleanTypePiece = 'SANS_PIECE';
+      else if (tp.includes('PERMIS') || tp.includes('DRIVER') || tp.includes('CONDUIRE')) cleanTypePiece = 'PERMIS';
       else if (tp.includes('PASSPORT') || tp.includes('PASSEPORT')) cleanTypePiece = 'PASSEPORT';
       else if (tp.includes('CONSULAIRE')) cleanTypePiece = 'CARTE_CONSULAIRE';
       else if (tp.includes('SEJOUR') || tp.includes('SÉJOUR')) cleanTypePiece = 'CARTE_SEJOUR';
       else if (tp.includes('CEDEAO')) cleanTypePiece = 'CARTE_IDENTITE_CEDEAO';
-      else if (['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE'].includes(tp)) cleanTypePiece = tp;
+      else if (tp.includes('GRISE')) cleanTypePiece = 'CARTE_GRISE';
+      else if (['CNI', 'PASSEPORT', 'PERMIS', 'CARTE_SEJOUR', 'CARTE_IDENTITE_CEDEAO', 'CARTE_CONSULAIRE', 'CARTE_GRISE', 'SANS_PIECE', 'AUTRE'].includes(tp)) cleanTypePiece = tp;
     }
 
     const visiteur = await Visiteur.create({
