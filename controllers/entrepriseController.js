@@ -2,7 +2,7 @@ const { Entreprise, Utilisateur, Visite } = require('../models');
 
 const creerEntreprise = async (req, res) => {
   try {
-    const { nom, code, adresse, telephone, emailContact } = req.body;
+    const { nom, code, adresse, telephone, emailContact, maxAdmins, maxAgents } = req.body;
     if (!nom || !code) {
       return res.status(400).json({ success: false, message: 'Nom et code entreprise requis.' });
     }
@@ -19,6 +19,8 @@ const creerEntreprise = async (req, res) => {
       telephone: telephone || '',
       emailContact: emailContact || '',
       statut: 'ACTIF',
+      maxAdmins: maxAdmins ? Math.max(1, Number(maxAdmins)) : 5,
+      maxAgents: maxAgents ? Math.max(1, Number(maxAgents)) : 20,
     });
 
     res.status(201).json({
@@ -63,7 +65,7 @@ const listerEntreprises = async (req, res) => {
 const modifierEntreprise = async (req, res) => {
   try {
     const { id } = req.params;
-    const { nom, code, immatriculation, adresse, telephone, emailContact, email, secteur } = req.body;
+    const { nom, code, immatriculation, adresse, telephone, emailContact, email, secteur, maxAdmins, maxAgents } = req.body;
 
     const entreprise = await Entreprise.findById(id);
     if (!entreprise) {
@@ -76,6 +78,8 @@ const modifierEntreprise = async (req, res) => {
     if (telephone !== undefined) entreprise.telephone = telephone;
     if (emailContact || email) entreprise.emailContact = emailContact || email;
     if (secteur !== undefined) entreprise.secteur = secteur;
+    if (maxAdmins !== undefined && !isNaN(maxAdmins)) entreprise.maxAdmins = Math.max(1, Number(maxAdmins));
+    if (maxAgents !== undefined && !isNaN(maxAgents)) entreprise.maxAgents = Math.max(1, Number(maxAgents));
 
     await entreprise.save();
 

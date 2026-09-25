@@ -184,6 +184,31 @@ const register = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Cet adresse e-mail est déjà utilisée.' });
     }
 
+    if (targetEntrepriseId) {
+      const entreprise = await Entreprise.findById(targetEntrepriseId);
+      if (entreprise) {
+        if (targetRole === 'ADMIN') {
+          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'ADMIN' });
+          const max = entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5;
+          if (count >= max) {
+            return res.status(403).json({
+              success: false,
+              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} administrateur(s).`,
+            });
+          }
+        } else if (targetRole === 'AGENT') {
+          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'AGENT' });
+          const max = entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20;
+          if (count >= max) {
+            return res.status(403).json({
+              success: false,
+              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} agent(s).`,
+            });
+          }
+        }
+      }
+    }
+
     const utilisateur = new Utilisateur({
       nom: String(nom).trim(),
       prenom: prenom ? String(prenom).trim() : '',
@@ -279,6 +304,34 @@ const mettreAJourProfil = async (req, res) => {
     }
 
     if (isSuperAdmin) {
+      const newRole = (role && ['SUPER_ADMIN', 'ADMIN', 'AGENT'].includes(role)) ? role : utilisateur.role;
+      const newEntrepriseId = entrepriseId !== undefined ? (entrepriseId || null) : utilisateur.entrepriseId;
+
+      if (newEntrepriseId && (newRole !== utilisateur.role || String(newEntrepriseId) !== String(utilisateur.entrepriseId))) {
+        const entreprise = await Entreprise.findById(newEntrepriseId);
+        if (entreprise) {
+          if (newRole === 'ADMIN') {
+            const count = await Utilisateur.countDocuments({ entrepriseId: newEntrepriseId, role: 'ADMIN', _id: { $ne: targetId } });
+            const max = entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5;
+            if (count >= max) {
+              return res.status(403).json({
+                success: false,
+                message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} administrateur(s).`,
+              });
+            }
+          } else if (newRole === 'AGENT') {
+            const count = await Utilisateur.countDocuments({ entrepriseId: newEntrepriseId, role: 'AGENT', _id: { $ne: targetId } });
+            const max = entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20;
+            if (count >= max) {
+              return res.status(403).json({
+                success: false,
+                message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} agent(s).`,
+              });
+            }
+          }
+        }
+      }
+
       if (role && ['SUPER_ADMIN', 'ADMIN', 'AGENT'].includes(role)) {
         utilisateur.role = role;
       }
