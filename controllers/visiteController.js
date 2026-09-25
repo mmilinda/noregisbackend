@@ -16,8 +16,18 @@ const construireFiltrePérimètre = (req) => {
     if (entId) filtre.entrepriseId = entId;
     if (req.query.agentId) filtre.agentId = req.query.agentId;
   } else {
-    // AGENT: voit uniquement son propre historique de visites enregistrées
-    filtre.agentId = user._id;
+    // AGENT: voit son propre historique de visites enregistrées ainsi que les visites de sa boîte sans agent explicite
+    const entId = user.entrepriseId?._id || user.entrepriseId;
+    if (entId) {
+      filtre.entrepriseId = entId;
+      filtre.$or = [
+        { agentId: user._id },
+        { agentId: null },
+        { agentId: { $exists: false } }
+      ];
+    } else {
+      filtre.agentId = user._id;
+    }
   }
 
   return filtre;
