@@ -244,33 +244,64 @@ const monProfil = async (req, res) => {
 const mettreAJourProfil = async (req, res) => {
   try {
     const targetId = req.params.id || req.utilisateur._id;
+    const isSuperAdmin = req.utilisateur.role === 'SUPER_ADMIN';
+    const isAdmin = req.utilisateur.role === 'ADMIN';
 
-    if (String(req.utilisateur._id) !== String(targetId) && req.utilisateur.role !== 'SUPER_ADMIN' && req.utilisateur.role !== 'ADMIN') {
+    if (String(req.utilisateur._id) !== String(targetId) && !isSuperAdmin && !isAdmin) {
       return res.status(403).json({ success: false, message: 'Accès refusé.' });
     }
 
-    const updates = {};
-    PROFILE_FIELDS.forEach(field => {
-      if (req.body[field] !== undefined) {
-        updates[field] = field === 'dateArrivee' ? (req.body[field] ? new Date(req.body[field]) : null) : req.body[field];
-      }
-    });
-
-    if (req.utilisateur.role === 'SUPER_ADMIN' && req.body.role) {
-      updates.role = req.body.role;
-    }
-
-    const utilisateur = await Utilisateur.findByIdAndUpdate(
-      targetId,
-      { $set: updates },
-      { new: true, runValidators: true, select: '-motDePasse' }
-    );
-
+    const utilisateur = await Utilisateur.findById(targetId);
     if (!utilisateur) {
       return res.status(404).json({ success: false, message: 'Utilisateur introuvable.' });
     }
 
-    res.json({ success: true, message: 'Profil mis à jour.', utilisateur });
+    const {
+      nom, prenom, email, telephone, departement, poste,
+      niveauAccreditation, dateArrivee, role, entrepriseId,
+      motDePasse, password, statutCompte
+    } = req.body;
+
+    if (nom !== undefined) utilisateur.nom = String(nom).trim();
+    if (prenom !== undefined) utilisateur.prenom = String(prenom).trim();
+    if (telephone !== undefined) utilisateur.telephone = String(telephone).trim();
+    if (departement !== undefined) utilisateur.departement = String(departement).trim();
+    if (poste !== undefined) utilisateur.poste = String(poste).trim();
+    if (niveauAccreditation !== undefined) utilisateur.niveauAccreditation = String(niveauAccreditation).trim();
+    if (dateArrivee !== undefined) utilisateur.dateArrivee = dateArrivee ? new Date(dateArrivee) : null;
+
+    if (email && email.toLowerCase().trim() !== utilisateur.email) {
+      const existeEmail = await Utilisateur.findOne({ email: email.toLowerCase().trim(), _id: { $ne: targetId } });
+      if (existeEmail) {
+        return res.status(409).json({ success: false, message: 'Cet e-mail est déjà utilisé par un autre compte.' });
+      }
+      utilisateur.email = email.toLowerCase().trim();
+    }
+
+    if (isSuperAdmin) {
+      if (role && ['SUPER_ADMIN', 'ADMIN', 'AGENT'].includes(role)) {
+        utilisateur.role = role;
+      }
+      if (entrepriseId !== undefined) {
+        utilisateur.entrepriseId = entrepriseId || null;
+      }
+      if (statutCompte && ['ACTIF', 'SUSPENDU', 'DESACTIVE'].includes(statutCompte)) {
+        utilisateur.statutCompte = statutCompte;
+      }
+    }
+
+    const newPassword = motDePasse || password;
+    if (newPassword && String(newPassword).trim().length > 0) {
+      utilisateur.motDePasse = String(newPassword).trim();
+    }
+
+    await utilisateur.save();
+
+    const updatedUser = await Utilisateur.findById(utilisateur._id)
+      .select('-motDePasse')
+      .populate('entrepriseId', 'nom code statut');
+
+    res.json({ success: true, message: 'Compte mis à jour avec succès.', utilisateur: updatedUser });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

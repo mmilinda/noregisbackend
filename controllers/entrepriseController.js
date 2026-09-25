@@ -63,7 +63,7 @@ const listerEntreprises = async (req, res) => {
 const modifierEntreprise = async (req, res) => {
   try {
     const { id } = req.params;
-    const { nom, adresse, telephone, emailContact } = req.body;
+    const { nom, code, immatriculation, adresse, telephone, emailContact, email, secteur } = req.body;
 
     const entreprise = await Entreprise.findById(id);
     if (!entreprise) {
@@ -71,9 +71,11 @@ const modifierEntreprise = async (req, res) => {
     }
 
     if (nom) entreprise.nom = String(nom).trim();
+    if (code || immatriculation) entreprise.code = String(code || immatriculation).toUpperCase().trim();
     if (adresse !== undefined) entreprise.adresse = adresse;
     if (telephone !== undefined) entreprise.telephone = telephone;
-    if (emailContact !== undefined) entreprise.emailContact = emailContact;
+    if (emailContact || email) entreprise.emailContact = emailContact || email;
+    if (secteur !== undefined) entreprise.secteur = secteur;
 
     await entreprise.save();
 
