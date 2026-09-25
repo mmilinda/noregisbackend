@@ -51,6 +51,10 @@ const visiteurSchema = new mongoose.Schema({
   dateExpiration:   { type: Date, default: null },
   centreEnregistrement: { type: String, maxlength: 200, default: null },
 
+  // Rattachement Multi-tenant
+  entrepriseId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Entreprise', default: null, index: true },
+  creeParAgentId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Utilisateur', default: null, index: true },
+
   // Contact & Adresse
   telephone:        { type: String, maxlength: 30, default: null },
   adresseDomicile:  { type: String, maxlength: 255, default: null },

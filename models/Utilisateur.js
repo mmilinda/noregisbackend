@@ -6,7 +6,9 @@ const utilisateurSchema = new mongoose.Schema({
   prenom:              { type: String, maxlength: 100, default: '' },
   email:               { type: String, required: true, unique: true, lowercase: true },
   motDePasse:          { type: String, required: true },
-  role:                { type: String, enum: ['AGENT', 'ADMIN'], default: 'AGENT' },
+  role:                { type: String, enum: ['SUPER_ADMIN', 'ADMIN', 'AGENT'], default: 'AGENT' },
+  entrepriseId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Entreprise', default: null },
+  statutCompte:        { type: String, enum: ['ACTIF', 'SUSPENDU', 'DESACTIVE'], default: 'ACTIF' },
   isActif:             { type: Boolean, default: true },
   telephone:           { type: String, maxlength: 30, default: '' },
   departement:         { type: String, maxlength: 100, default: '' },
@@ -20,6 +22,7 @@ const utilisateurSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 utilisateurSchema.pre('save', async function (next) {
+  this.isActif = this.statutCompte === 'ACTIF';
   if (!this.isModified('motDePasse')) return next();
   this.motDePasse = await bcrypt.hash(this.motDePasse, 10);
   next();

@@ -34,6 +34,7 @@ app.use('/api/public-scan', require('./routes/publicScan'));
 app.use('/api/verify-document', require('./routes/verifyDocument'));
 app.use('/api/search',    require('./routes/search'));
 app.use('/api/demandes',  require('./routes/demandes'));
+app.use('/api/entreprises', require('./routes/entreprises'));
 
 app.get('/', (req, res) => {
   res.json({ message: 'Registre Visiteurs API — OK', version: '1.0.0' });
