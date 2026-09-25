@@ -2,7 +2,7 @@ const { Entreprise, Utilisateur, Visite } = require('../models');
 
 const creerEntreprise = async (req, res) => {
   try {
-    const { nom, code, adresse, telephone, emailContact, maxAdmins, maxAgents } = req.body;
+    const { nom, code, adresse, telephone, emailContact, secteur, maxAdmins, maxAgents } = req.body;
     if (!nom || !code) {
       return res.status(400).json({ success: false, message: 'Nom et code entreprise requis.' });
     }
@@ -18,6 +18,7 @@ const creerEntreprise = async (req, res) => {
       adresse: adresse || '',
       telephone: telephone || '',
       emailContact: emailContact || '',
+      secteur: secteur || 'Maritime / Logistique',
       statut: 'ACTIF',
       maxAdmins: maxAdmins ? Math.max(1, Number(maxAdmins)) : 5,
       maxAgents: maxAgents ? Math.max(1, Number(maxAgents)) : 20,
