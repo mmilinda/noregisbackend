@@ -6,10 +6,12 @@ const construireFiltrePérimètre = (req) => {
 
   if (!user) return filtre;
 
-  if (user.role === 'SUPER_ADMIN') {
+  const role = (user.role || '').toUpperCase();
+
+  if (role === 'SUPER_ADMIN' || role === 'SUPERADMIN') {
     if (req.query.entrepriseId) filtre.entrepriseId = req.query.entrepriseId;
     if (req.query.agentId) filtre.agentId = req.query.agentId;
-  } else if (user.role === 'ADMIN') {
+  } else if (role === 'ADMIN') {
     const entId = user.entrepriseId?._id || user.entrepriseId;
     if (entId) filtre.entrepriseId = entId;
     if (req.query.agentId) filtre.agentId = req.query.agentId;
