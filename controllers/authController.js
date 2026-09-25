@@ -406,4 +406,43 @@ const genererQrAgent = async (req, res) => {
   }
 };
 
-module.exports = { login, verifier2FA, renvoyer2FA, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent };
+const reinitialiserMotDePasse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nouveauMotDePasse, motDePasse, password } = req.body;
+    const pass = nouveauMotDePasse || motDePasse || password;
+    const demandeur = req.utilisateur;
+
+    if (!pass || String(pass).trim().length < 4) {
+      return res.status(400).json({ success: false, message: 'Le nouveau mot de passe doit comporter au moins 4 caractères.' });
+    }
+
+    const target = await Utilisateur.findById(id);
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Utilisateur introuvable.' });
+    }
+
+    if (demandeur.role === 'ADMIN') {
+      const entDemandeur = demandeur.entrepriseId?._id || demandeur.entrepriseId;
+      const entTarget = target.entrepriseId?._id || target.entrepriseId;
+      if (String(entDemandeur) !== String(entTarget) || target.role !== 'AGENT') {
+        return res.status(403).json({ success: false, message: 'Accès refusé.' });
+      }
+    } else if (demandeur.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ success: false, message: 'Accès refusé.' });
+    }
+
+    target.motDePasse = String(pass).trim();
+    await target.save();
+
+    res.json({
+      success: true,
+      message: `Mot de passe du compte ${target.prenom} ${target.nom} réinitialisé avec succès.`,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { login, verifier2FA, renvoyer2FA, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent, reinitialiserMotDePasse };
+
