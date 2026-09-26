@@ -168,8 +168,10 @@ const register = async (req, res) => {
 
     if (createur) {
       if (createur.role === 'ADMIN') {
-        targetRole = 'AGENT'; // Un Admin de boîte ne peut créer que des Agents
         targetEntrepriseId = createur.entrepriseId?._id || createur.entrepriseId;
+        if (!['AGENT', 'ADMIN'].includes(targetRole)) {
+          return res.status(400).json({ success: false, message: 'Un administrateur peut uniquement créer des rôles Agent ou Admin pour son entreprise.' });
+        }
       } else if (createur.role === 'SUPER_ADMIN') {
         if (!['ADMIN', 'AGENT', 'SUPER_ADMIN'].includes(targetRole)) {
           return res.status(400).json({ success: false, message: 'Rôle invalide.' });
@@ -372,7 +374,7 @@ const listerUtilisateurs = async (req, res) => {
       const entId = demandeur.entrepriseId?._id || demandeur.entrepriseId;
       filtre = {
         entrepriseId: entId,
-        role: 'AGENT',
+        ...(req.query.role ? { role: req.query.role } : { role: { $in: ['AGENT', 'ADMIN'] } }),
       };
     } else {
       return res.status(403).json({ success: false, message: 'Accès refusé.' });
@@ -406,8 +408,8 @@ const toggleActif = async (req, res) => {
     if (demandeur.role === 'ADMIN') {
       const entDemandeur = demandeur.entrepriseId?._id || demandeur.entrepriseId;
       const entCible = cible.entrepriseId?._id || cible.entrepriseId;
-      if (String(entDemandeur) !== String(entCible) || cible.role !== 'AGENT') {
-        return res.status(403).json({ success: false, message: 'Un administrateur de boîte ne peut modifier que le statut de ses propres agents.' });
+      if (String(entDemandeur) !== String(entCible) || !['AGENT', 'ADMIN'].includes(cible.role)) {
+        return res.status(403).json({ success: false, message: 'Un administrateur de boîte ne peut modifier que le statut des membres de son entreprise.' });
       }
     } else if (demandeur.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ success: false, message: 'Accès refusé.' });
@@ -478,7 +480,7 @@ const reinitialiserMotDePasse = async (req, res) => {
     if (demandeur.role === 'ADMIN') {
       const entDemandeur = demandeur.entrepriseId?._id || demandeur.entrepriseId;
       const entTarget = target.entrepriseId?._id || target.entrepriseId;
-      if (String(entDemandeur) !== String(entTarget) || target.role !== 'AGENT') {
+      if (String(entDemandeur) !== String(entTarget) || !['AGENT', 'ADMIN'].includes(target.role)) {
         return res.status(403).json({ success: false, message: 'Accès refusé.' });
       }
     } else if (demandeur.role !== 'SUPER_ADMIN') {
