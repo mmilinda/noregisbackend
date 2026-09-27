@@ -70,10 +70,13 @@ exports.listerBugs = async (req, res) => {
       // SuperAdmin voit tous les bugs ou par entreprise filtrée
       if (queryEnt) filter.entrepriseId = queryEnt;
     } else if (role === 'ADMIN') {
-      // Admin voit les bugs de son entreprise
+      // Admin voit les bugs de son entreprise et les siennes
       let entId = userEnt ? (userEnt._id ? userEnt._id : userEnt) : null;
-      if (entId) filter.entrepriseId = entId;
-      else filter.signaleParId = userId;
+      if (entId) {
+        filter.$or = [{ entrepriseId: entId }, { signaleParId: userId }];
+      } else {
+        filter.signaleParId = userId;
+      }
     } else {
       // Agent voit uniquement les bugs qu'il a signalés
       filter.signaleParId = userId;
