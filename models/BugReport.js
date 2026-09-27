@@ -20,6 +20,7 @@ const bugReportSchema = new mongoose.Schema({
   entrepriseNom:        { type: String, default: '' },
   transmisAuSuperAdmin: { type: Boolean, default: true },
   reponseSuperAdmin:    { type: String, default: '' },
+  reponseAdmin:         { type: String, default: '' },
   reponses:             [reponseSchema]
 }, { timestamps: true });
 

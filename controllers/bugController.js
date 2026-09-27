@@ -1,4 +1,42 @@
-const BugReport = require('../models/BugReport');
+// Helper pour formater un bug avec la distinction claire du rôle de l'auteur de la réponse
+const formaterBug = (b) => {
+  const bObj = b.toObject ? b.toObject() : { ...b };
+  const reponses = bObj.reponses || [];
+  const derniereRep = reponses.length > 0 ? reponses[reponses.length - 1] : null;
+
+  let reponduPar = 'AUCUN';
+  let libelleReponse = 'En attente de réponse';
+
+  if (derniereRep) {
+    const role = (derniereRep.roleAuteur || '').toUpperCase();
+    if (role === 'SUPER_ADMIN' || role === 'SUPERADMIN') {
+      reponduPar = 'SUPER_ADMIN';
+      libelleReponse = 'Répondu par SuperAdmin';
+      bObj.reponseSuperAdmin = derniereRep.message;
+    } else if (role === 'ADMIN') {
+      reponduPar = 'ADMIN';
+      libelleReponse = 'Répondu par Admin';
+      bObj.reponseAdmin = derniereRep.message;
+    }
+  } else {
+    if (bObj.reponseSuperAdmin) {
+      reponduPar = 'SUPER_ADMIN';
+      libelleReponse = 'Répondu par SuperAdmin';
+    } else if (bObj.reponseAdmin) {
+      reponduPar = 'ADMIN';
+      libelleReponse = 'Répondu par Admin';
+    } else if (bObj.statut && bObj.statut !== 'OUVERT') {
+      reponduPar = 'ADMIN';
+      libelleReponse = `Traité par Admin (${bObj.statut.toLowerCase()})`;
+      bObj.reponseAdmin = `Signalement ${bObj.statut.toLowerCase()}`;
+    }
+  }
+
+  bObj.reponduPar = reponduPar;
+  bObj.libelleReponse = libelleReponse;
+
+  return bObj;
+};
 
 /**
  * Créer un nouveau signalement de bug / problème
@@ -34,21 +72,23 @@ exports.creerBug = async (req, res) => {
       nomSignaleur: `${utilisateur.prenom || ''} ${utilisateur.nom || ''}`.trim(),
       entrepriseId,
       entrepriseNom,
-      transmisAuSuperAdmin: true, // Toujours transmis au SuperAdmin
+      transmisAuSuperAdmin: true,
     });
 
     await bug.save();
 
+    const formatted = formaterBug(bug);
+
     // Notification Socket.IO temps réel
     const io = req.app.get('io');
     if (io) {
-      io.emit('bug:created', bug);
+      io.emit('bug:created', formatted);
     }
 
     return res.status(201).json({
       success: true,
       message: 'Votre signalement de bug a été transmis avec succès au SuperAdmin.',
-      bug,
+      bug: formatted,
     });
   } catch (err) {
     console.error('Erreur creerBug :', err);
@@ -67,10 +107,8 @@ exports.listerBugs = async (req, res) => {
     let filter = {};
 
     if (role === 'SUPER_ADMIN' || role === 'SUPERADMIN') {
-      // SuperAdmin voit tous les bugs ou par entreprise filtrée
       if (queryEnt) filter.entrepriseId = queryEnt;
     } else if (role === 'ADMIN') {
-      // Admin voit les bugs de son entreprise et les siennes
       let entId = userEnt ? (userEnt._id ? userEnt._id : userEnt) : null;
       if (entId) {
         filter.$or = [{ entrepriseId: entId }, { signaleParId: userId }];
@@ -78,7 +116,6 @@ exports.listerBugs = async (req, res) => {
         filter.signaleParId = userId;
       }
     } else {
-      // Agent voit uniquement les bugs qu'il a signalés
       filter.signaleParId = userId;
     }
 
@@ -90,18 +127,7 @@ exports.listerBugs = async (req, res) => {
       .populate('entrepriseId', 'nom code')
       .sort({ createdAt: -1 });
 
-    const bugsFormatted = bugs.map(b => {
-      const bObj = b.toObject();
-      if (!bObj.reponseSuperAdmin) {
-        if (bObj.reponses && bObj.reponses.length > 0) {
-          const derniereRep = bObj.reponses[bObj.reponses.length - 1];
-          bObj.reponseSuperAdmin = derniereRep.message || 'Réponse enregistrée';
-        } else if (bObj.statut && bObj.statut !== 'OUVERT') {
-          bObj.reponseSuperAdmin = `Signalement ${bObj.statut.toLowerCase()}`;
-        }
-      }
-      return bObj;
-    });
+    const bugsFormatted = bugs.map(formaterBug);
 
     return res.json({
       success: true,
@@ -129,7 +155,7 @@ exports.repondreBug = async (req, res) => {
 
     const userRole = req.utilisateur.role;
     const isSuperAdmin = userRole === 'SUPER_ADMIN' || userRole === 'SUPERADMIN';
-    const isAdminOrSuperAdmin = isSuperAdmin || userRole === 'ADMIN';
+    const isAdmin = userRole === 'ADMIN';
 
     const userEnt = req.utilisateur.entrepriseId;
     const userEntId = userEnt ? (userEnt._id ? userEnt._id.toString() : userEnt.toString()) : null;
@@ -152,13 +178,13 @@ exports.repondreBug = async (req, res) => {
 
       bug.reponses.push(repObj);
 
-      if (isAdminOrSuperAdmin) {
+      if (isSuperAdmin) {
         bug.reponseSuperAdmin = message.trim();
         bug.transmisAuSuperAdmin = true;
+      } else if (isAdmin) {
+        bug.reponseAdmin = message.trim();
       }
 
-      // Si aucune demande explicite de nouveauStatut n'est fournie, passer automatiquement
-      // de 'OUVERT' à 'EN_COURS' lors de la première réponse
       if (bug.statut === 'OUVERT' && !nouveauStatut) {
         bug.statut = 'EN_COURS';
       }
@@ -166,8 +192,10 @@ exports.repondreBug = async (req, res) => {
 
     if (nouveauStatut && ['OUVERT', 'EN_COURS', 'RESOLU', 'FERME'].includes(nouveauStatut)) {
       bug.statut = nouveauStatut;
-      if (isAdminOrSuperAdmin && !bug.reponseSuperAdmin) {
+      if (isSuperAdmin && !bug.reponseSuperAdmin) {
         bug.reponseSuperAdmin = `Statut mis à jour vers ${nouveauStatut.toLowerCase()}`;
+      } else if (isAdmin && !bug.reponseAdmin) {
+        bug.reponseAdmin = `Statut mis à jour vers ${nouveauStatut.toLowerCase()}`;
       }
     }
 
@@ -177,16 +205,18 @@ exports.repondreBug = async (req, res) => {
       .populate('signaleParId', 'prenom nom email role')
       .populate('entrepriseId', 'nom code');
 
+    const formattedUpdatedBug = formaterBug(updatedBug || bug);
+
     // Notifier via Socket.IO
     const io = req.app.get('io');
     if (io) {
-      io.emit('bug:updated', updatedBug);
+      io.emit('bug:updated', formattedUpdatedBug);
     }
 
     return res.json({
       success: true,
       message: 'Réponse enregistrée et statut mis à jour avec succès.',
-      bug: updatedBug || bug,
+      bug: formattedUpdatedBug,
     });
   } catch (err) {
     console.error('Erreur repondreBug :', err);
