@@ -142,6 +142,12 @@ exports.repondreBug = async (req, res) => {
         bug.reponseSuperAdmin = message.trim();
         bug.transmisAuSuperAdmin = true;
       }
+
+      // Si aucune demande explicite de nouveauStatut n'est fournie, passer automatiquement
+      // de 'OUVERT' à 'EN_COURS' lors de la première réponse
+      if (bug.statut === 'OUVERT' && !nouveauStatut) {
+        bug.statut = 'EN_COURS';
+      }
     }
 
     if (nouveauStatut && ['OUVERT', 'EN_COURS', 'RESOLU', 'FERME'].includes(nouveauStatut)) {
