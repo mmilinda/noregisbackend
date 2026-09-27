@@ -123,7 +123,9 @@ exports.listerBugs = async (req, res) => {
         filter.signaleParId = userId;
       }
     } else {
+      // AGENT voit uniquement les bugs qu'il a signalés (pas ceux des administrateurs)
       filter.signaleParId = userId;
+      filter.roleSignaleur = { $nin: ['ADMIN', 'SUPER_ADMIN', 'SUPERADMIN'] };
     }
 
     if (statut) filter.statut = statut;
