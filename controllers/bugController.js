@@ -13,22 +13,29 @@ const formaterBug = (b) => {
       reponduPar = 'SUPER_ADMIN';
       libelleReponse = 'Répondu par SuperAdmin';
       bObj.reponseSuperAdmin = derniereRep.message;
+      bObj.reponseAdmin = '';
     } else if (role === 'ADMIN') {
       reponduPar = 'ADMIN';
       libelleReponse = 'Répondu par Admin';
       bObj.reponseAdmin = derniereRep.message;
+      bObj.reponseSuperAdmin = ''; // Forcer à vide si la dernière réponse vient d'un ADMIN
     }
   } else {
-    if (bObj.reponseSuperAdmin) {
+    if (bObj.reponseSuperAdmin && !bObj.reponseAdmin) {
       reponduPar = 'SUPER_ADMIN';
       libelleReponse = 'Répondu par SuperAdmin';
     } else if (bObj.reponseAdmin) {
       reponduPar = 'ADMIN';
       libelleReponse = 'Répondu par Admin';
+      bObj.reponseSuperAdmin = '';
     } else if (bObj.statut && bObj.statut !== 'OUVERT') {
       reponduPar = 'ADMIN';
       libelleReponse = `Traité par Admin (${bObj.statut.toLowerCase()})`;
       bObj.reponseAdmin = `Signalement ${bObj.statut.toLowerCase()}`;
+      bObj.reponseSuperAdmin = '';
+    } else {
+      bObj.reponseSuperAdmin = '';
+      bObj.reponseAdmin = '';
     }
   }
 
@@ -180,9 +187,11 @@ exports.repondreBug = async (req, res) => {
 
       if (isSuperAdmin) {
         bug.reponseSuperAdmin = message.trim();
+        bug.reponseAdmin = '';
         bug.transmisAuSuperAdmin = true;
       } else if (isAdmin) {
         bug.reponseAdmin = message.trim();
+        bug.reponseSuperAdmin = '';
       }
 
       if (bug.statut === 'OUVERT' && !nouveauStatut) {
