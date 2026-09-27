@@ -90,10 +90,23 @@ exports.listerBugs = async (req, res) => {
       .populate('entrepriseId', 'nom code')
       .sort({ createdAt: -1 });
 
+    const bugsFormatted = bugs.map(b => {
+      const bObj = b.toObject();
+      if (!bObj.reponseSuperAdmin) {
+        if (bObj.reponses && bObj.reponses.length > 0) {
+          const derniereRep = bObj.reponses[bObj.reponses.length - 1];
+          bObj.reponseSuperAdmin = derniereRep.message || 'Réponse enregistrée';
+        } else if (bObj.statut && bObj.statut !== 'OUVERT') {
+          bObj.reponseSuperAdmin = `Signalement ${bObj.statut.toLowerCase()}`;
+        }
+      }
+      return bObj;
+    });
+
     return res.json({
       success: true,
-      total: bugs.length,
-      bugs,
+      total: bugsFormatted.length,
+      bugs: bugsFormatted,
     });
   } catch (err) {
     console.error('Erreur listerBugs :', err);
@@ -116,6 +129,7 @@ exports.repondreBug = async (req, res) => {
 
     const userRole = req.utilisateur.role;
     const isSuperAdmin = userRole === 'SUPER_ADMIN' || userRole === 'SUPERADMIN';
+    const isAdminOrSuperAdmin = isSuperAdmin || userRole === 'ADMIN';
 
     const userEnt = req.utilisateur.entrepriseId;
     const userEntId = userEnt ? (userEnt._id ? userEnt._id.toString() : userEnt.toString()) : null;
@@ -138,7 +152,7 @@ exports.repondreBug = async (req, res) => {
 
       bug.reponses.push(repObj);
 
-      if (isSuperAdmin) {
+      if (isAdminOrSuperAdmin) {
         bug.reponseSuperAdmin = message.trim();
         bug.transmisAuSuperAdmin = true;
       }
@@ -152,6 +166,9 @@ exports.repondreBug = async (req, res) => {
 
     if (nouveauStatut && ['OUVERT', 'EN_COURS', 'RESOLU', 'FERME'].includes(nouveauStatut)) {
       bug.statut = nouveauStatut;
+      if (isAdminOrSuperAdmin && !bug.reponseSuperAdmin) {
+        bug.reponseSuperAdmin = `Statut mis à jour vers ${nouveauStatut.toLowerCase()}`;
+      }
     }
 
     await bug.save();
