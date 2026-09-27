@@ -114,12 +114,10 @@ exports.repondreBug = async (req, res) => {
     const userRole = req.utilisateur.role;
     const isSuperAdmin = userRole === 'SUPER_ADMIN' || userRole === 'SUPERADMIN';
 
-    // Vérification des droits (SuperAdmin accès global, Admin accès à sa boîte)
-    let userEntId = req.utilisateur.entrepriseId
-      ? (req.utilisateur.entrepriseId._id ? req.utilisateur.entrepriseId._id.toString() : req.utilisateur.entrepriseId.toString())
-      : null;
+    const isSignaleur = bug.signaleParId && bug.signaleParId.toString() === req.utilisateur._id.toString();
+    const isSameCompany = bug.entrepriseId && userEntId && bug.entrepriseId.toString() === userEntId;
 
-    if (!isSuperAdmin && bug.entrepriseId && bug.entrepriseId.toString() !== userEntId) {
+    if (!isSuperAdmin && !isSameCompany && !isSignaleur) {
       return res.status(403).json({ success: false, message: 'Accès non autorisé à ce signalement.' });
     }
 
