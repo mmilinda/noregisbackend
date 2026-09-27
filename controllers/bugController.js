@@ -117,6 +117,9 @@ exports.repondreBug = async (req, res) => {
     const userRole = req.utilisateur.role;
     const isSuperAdmin = userRole === 'SUPER_ADMIN' || userRole === 'SUPERADMIN';
 
+    const userEnt = req.utilisateur.entrepriseId;
+    const userEntId = userEnt ? (userEnt._id ? userEnt._id.toString() : userEnt.toString()) : null;
+
     const isSignaleur = bug.signaleParId && bug.signaleParId.toString() === req.utilisateur._id.toString();
     const isSameCompany = bug.entrepriseId && userEntId && bug.entrepriseId.toString() === userEntId;
 
@@ -127,7 +130,7 @@ exports.repondreBug = async (req, res) => {
     if (message && message.trim()) {
       const repObj = {
         auteurId: req.utilisateur._id,
-        nomAuteur: `${req.utilisateur.prenom || ''} ${req.utilisateur.nom || ''}`.trim(),
+        nomAuteur: `${req.utilisateur.prenom || ''} ${req.utilisateur.nom || ''}`.trim() || 'Utilisateur',
         roleAuteur: userRole,
         message: message.trim(),
         createdAt: new Date(),
@@ -147,16 +150,20 @@ exports.repondreBug = async (req, res) => {
 
     await bug.save();
 
+    const updatedBug = await BugReport.findById(bug._id)
+      .populate('signaleParId', 'prenom nom email role')
+      .populate('entrepriseId', 'nom code');
+
     // Notifier via Socket.IO
     const io = req.app.get('io');
     if (io) {
-      io.emit('bug:updated', bug);
+      io.emit('bug:updated', updatedBug);
     }
 
     return res.json({
       success: true,
       message: 'Réponse enregistrée et statut mis à jour avec succès.',
-      bug,
+      bug: updatedBug || bug,
     });
   } catch (err) {
     console.error('Erreur repondreBug :', err);
