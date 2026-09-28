@@ -221,7 +221,7 @@ const register = async (req, res) => {
               currentCount: count,
               maxAllowed: max,
               entrepriseNom: entreprise.nom,
-              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} administrateur(s). Impossible de créer un nouveau compte administrateur.`,
+              message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
             });
           }
         } else if (targetRole === 'AGENT') {
@@ -246,7 +246,7 @@ const register = async (req, res) => {
               currentCount: count,
               maxAllowed: max,
               entrepriseNom: entreprise.nom,
-              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} agent(s). Impossible de créer un nouveau compte agent.`,
+              message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
             });
           }
         }
@@ -360,7 +360,8 @@ const mettreAJourProfil = async (req, res) => {
             if (count >= max) {
               return res.status(403).json({
                 success: false,
-                message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} administrateur(s).`,
+                quotaAtteint: true,
+                message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
               });
             }
           } else if (newRole === 'AGENT') {
@@ -369,7 +370,8 @@ const mettreAJourProfil = async (req, res) => {
             if (count >= max) {
               return res.status(403).json({
                 success: false,
-                message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} agent(s).`,
+                quotaAtteint: true,
+                message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
               });
             }
           }
