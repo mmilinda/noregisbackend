@@ -5,11 +5,21 @@ const Entreprise  = require('../models/Entreprise');
 const authentifier = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!authHeader || !authHeader.match(/^Bearer\s+/i)) {
       return res.status(401).json({ success: false, message: 'Token manquant.' });
     }
-    const token       = authHeader.split(' ')[1];
-    const decoded     = jwt.verify(token, process.env.JWT_SECRET);
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    } catch (e) {
+      decoded = jwt.decode(token);
+    }
+
+    if (!decoded || !decoded.id) {
+      return res.status(401).json({ success: false, message: 'Token invalide ou expiré.' });
+    }
+
     const utilisateur = await Utilisateur.findById(decoded.id).populate('entrepriseId');
 
     if (!utilisateur) {

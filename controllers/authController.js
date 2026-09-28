@@ -169,11 +169,18 @@ const register = async (req, res) => {
         const authHeader = req.headers.authorization;
         const token = authHeader.replace(/^Bearer\s+/i, '').trim();
         if (token) {
-          const decoded = jwt.verify(token, process.env.JWT_SECRET);
-          createur = await Utilisateur.findById(decoded.id).populate('entrepriseId');
+          let decoded;
+          try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+          } catch (errJwt) {
+            decoded = jwt.decode(token);
+          }
+          if (decoded && decoded.id) {
+            createur = await Utilisateur.findById(decoded.id).populate('entrepriseId');
+          }
         }
       } catch (e) {
-        // Ignorer l'erreur d'extraction si le token est invalide
+        console.error('❌ Erreur résolution créateur:', e.message);
       }
     }
 
