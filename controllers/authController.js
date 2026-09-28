@@ -248,19 +248,11 @@ const register = async (req, res) => {
 
       const count = await Utilisateur.countDocuments({ entrepriseId: entrepriseFilter, role: roleFilter });
 
-      let maxAllowed = targetRole === 'ADMIN'
-        ? (entreprise.maxAdmins !== undefined && entreprise.maxAdmins !== null ? Number(entreprise.maxAdmins) : 2)
-        : (entreprise.maxAgents !== undefined && entreprise.maxAgents !== null ? Number(entreprise.maxAgents) : 4);
+      const maxAllowed = targetRole === 'ADMIN'
+        ? (entreprise.maxAdmins !== undefined && entreprise.maxAdmins !== null ? Number(entreprise.maxAdmins) : 1)
+        : (entreprise.maxAgents !== undefined && entreprise.maxAgents !== null ? Number(entreprise.maxAgents) : 1);
 
-      // Si le document en BDD possédait l'ancienne valeur par défaut (20 pour agents ou 5 pour admins), appliquer le quota de 4 agents et 2 admins
-      if (targetRole === 'AGENT' && maxAllowed === 20) {
-        maxAllowed = 4;
-      }
-      if (targetRole === 'ADMIN' && maxAllowed === 5) {
-        maxAllowed = 2;
-      }
-
-      console.log(`🔍 [REGISTER QUOTA CHECK] Entreprise: "${entreprise.nom}" (${entreprise._id}) | Rôle: ${targetRole} | Actuels: ${count} | Max: ${maxAllowed}`);
+      console.log(`🔍 [REGISTER QUOTA CHECK] Entreprise: "${entreprise.nom}" (${entreprise._id}) | Rôle: ${targetRole} | Actuels: ${count} | Quota SuperAdmin: ${maxAllowed}`);
 
       if (count >= maxAllowed) {
         console.warn(`⚠️ [QUOTA ATTEINT] Entreprise "${entreprise.nom}" (${entreprise._id}) a atteint son quota (${count}/${maxAllowed}). Bloqué.`);
