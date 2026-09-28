@@ -246,7 +246,8 @@ const register = async (req, res) => {
       const entIdObj = entreprise._id;
       const entrepriseFilter = { $in: [entIdObj, entIdStr] };
 
-      const count = await Utilisateur.countDocuments({ entrepriseId: entrepriseFilter, role: roleFilter });
+      // Utilisation directe de Utilisateur.collection.countDocuments pour compter tous les BSON types d'entrepriseId (ObjectId et String)
+      const count = await Utilisateur.collection.countDocuments({ entrepriseId: entrepriseFilter, role: roleFilter });
 
       const maxAllowed = targetRole === 'ADMIN'
         ? (entreprise.maxAdmins !== undefined && entreprise.maxAdmins !== null ? Number(entreprise.maxAdmins) : 1)
@@ -587,6 +588,11 @@ const obtenirStatutQuota = async (req, res) => {
     }
 
     if (!targetEntrepriseId) {
+      const entFallback = await Entreprise.findOne().sort({ createdAt: 1 });
+      if (entFallback) targetEntrepriseId = entFallback._id;
+    }
+
+    if (!targetEntrepriseId) {
       return res.status(400).json({ success: false, message: 'Identifiant d\'entreprise introuvable.' });
     }
 
@@ -595,13 +601,17 @@ const obtenirStatutQuota = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Entreprise introuvable.' });
     }
 
+    const entIdStr = String(entreprise._id);
+    const entIdObj = entreprise._id;
+    const entFilter = { $in: [entIdObj, entIdStr] };
+
     const [nbAdmins, nbAgents] = await Promise.all([
-      Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'ADMIN' }),
-      Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'AGENT' }),
+      Utilisateur.collection.countDocuments({ entrepriseId: entFilter, role: { $regex: /^ADMIN$/i } }),
+      Utilisateur.collection.countDocuments({ entrepriseId: entFilter, role: { $regex: /^AGENT$/i } }),
     ]);
 
-    const maxAdmins = entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5;
-    const maxAgents = entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20;
+    const maxAdmins = entreprise.maxAdmins !== undefined && entreprise.maxAdmins !== null ? Number(entreprise.maxAdmins) : 1;
+    const maxAgents = entreprise.maxAgents !== undefined && entreprise.maxAgents !== null ? Number(entreprise.maxAgents) : 1;
 
     const isAgentQuotaReached = nbAgents >= maxAgents;
     const isAdminQuotaReached = nbAdmins >= maxAdmins;
