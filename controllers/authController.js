@@ -162,7 +162,17 @@ const register = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Nom, email et mot de passe requis.' });
     }
 
-    const createur = req.utilisateur;
+    let createur = req.utilisateur;
+    if (!createur && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      try {
+        const token = req.headers.authorization.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        createur = await Utilisateur.findById(decoded.id).populate('entrepriseId');
+      } catch (e) {
+        // Ignorer l'erreur si le token est invalide
+      }
+    }
+
     let targetRole = role || 'AGENT';
     let targetEntrepriseId = entrepriseId || null;
 
@@ -193,18 +203,50 @@ const register = async (req, res) => {
           const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'ADMIN' });
           const max = entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5;
           if (count >= max) {
+            const io = req.app?.get?.('io');
+            if (io) {
+              io.emit('quota:atteint', {
+                entrepriseId: targetEntrepriseId,
+                entrepriseNom: entreprise.nom,
+                roleTargeted: 'ADMIN',
+                currentCount: count,
+                maxAllowed: max,
+                adminId: createur?._id || null,
+              });
+            }
             return res.status(403).json({
               success: false,
-              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} administrateur(s).`,
+              quotaAtteint: true,
+              roleTargeted: 'ADMIN',
+              currentCount: count,
+              maxAllowed: max,
+              entrepriseNom: entreprise.nom,
+              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} administrateur(s). Impossible de créer un nouveau compte administrateur.`,
             });
           }
         } else if (targetRole === 'AGENT') {
           const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'AGENT' });
           const max = entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20;
           if (count >= max) {
+            const io = req.app?.get?.('io');
+            if (io) {
+              io.emit('quota:atteint', {
+                entrepriseId: targetEntrepriseId,
+                entrepriseNom: entreprise.nom,
+                roleTargeted: 'AGENT',
+                currentCount: count,
+                maxAllowed: max,
+                adminId: createur?._id || null,
+              });
+            }
             return res.status(403).json({
               success: false,
-              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} agent(s).`,
+              quotaAtteint: true,
+              roleTargeted: 'AGENT',
+              currentCount: count,
+              maxAllowed: max,
+              entrepriseNom: entreprise.nom,
+              message: `Quota atteint : L'entreprise "${entreprise.nom}" a atteint sa limite de ${max} agent(s). Impossible de créer un nouveau compte agent.`,
             });
           }
         }
@@ -499,5 +541,62 @@ const reinitialiserMotDePasse = async (req, res) => {
   }
 };
 
-module.exports = { login, verifier2FA, renvoyer2FA, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent, reinitialiserMotDePasse };
+const obtenirStatutQuota = async (req, res) => {
+  try {
+    const demandeur = req.utilisateur;
+    let targetEntrepriseId = req.query.entrepriseId;
+
+    if (demandeur.role === 'ADMIN') {
+      targetEntrepriseId = demandeur.entrepriseId?._id || demandeur.entrepriseId;
+    } else if (demandeur.role === 'SUPER_ADMIN') {
+      if (!targetEntrepriseId) {
+        targetEntrepriseId = demandeur.entrepriseId?._id || demandeur.entrepriseId;
+      }
+    } else {
+      return res.status(403).json({ success: false, message: 'Accès refusé.' });
+    }
+
+    if (!targetEntrepriseId) {
+      return res.status(400).json({ success: false, message: 'Identifiant d\'entreprise introuvable.' });
+    }
+
+    const entreprise = await Entreprise.findById(targetEntrepriseId);
+    if (!entreprise) {
+      return res.status(404).json({ success: false, message: 'Entreprise introuvable.' });
+    }
+
+    const [nbAdmins, nbAgents] = await Promise.all([
+      Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'ADMIN' }),
+      Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'AGENT' }),
+    ]);
+
+    const maxAdmins = entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5;
+    const maxAgents = entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20;
+
+    const isAgentQuotaReached = nbAgents >= maxAgents;
+    const isAdminQuotaReached = nbAdmins >= maxAdmins;
+
+    res.json({
+      success: true,
+      entreprise: {
+        id: entreprise._id,
+        nom: entreprise.nom,
+        code: entreprise.code,
+      },
+      quota: {
+        nbAdmins,
+        maxAdmins,
+        isAdminQuotaReached,
+        nbAgents,
+        maxAgents,
+        isAgentQuotaReached,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { login, verifier2FA, renvoyer2FA, register, monProfil, mettreAJourProfil, listerUtilisateurs, toggleActif, genererQrAgent, reinitialiserMotDePasse, obtenirStatutQuota };
+
 
