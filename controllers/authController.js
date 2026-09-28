@@ -1,4 +1,5 @@
 const jwt         = require('jsonwebtoken');
+const mongoose    = require('mongoose');
 const Utilisateur = require('../models/Utilisateur');
 const Entreprise  = require('../models/Entreprise');
 
@@ -169,7 +170,7 @@ const register = async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         createur = await Utilisateur.findById(decoded.id).populate('entrepriseId');
       } catch (e) {
-        // Ignorer l'erreur si le token est invalide
+        // Ignorer l'erreur d'extraction si le token est invalide
       }
     }
 
@@ -183,7 +184,8 @@ const register = async (req, res) => {
 
     if (createur) {
       if (createur.role === 'ADMIN') {
-        targetEntrepriseId = createur.entrepriseId?._id || createur.entrepriseId || targetEntrepriseId;
+        const adminEntId = createur.entrepriseId?._id || createur.entrepriseId;
+        targetEntrepriseId = adminEntId || targetEntrepriseId;
         if (!targetEntrepriseId) {
           return res.status(400).json({ success: false, message: 'L\'administrateur n\'est rattaché à aucune entreprise.' });
         }
@@ -201,65 +203,48 @@ const register = async (req, res) => {
 
     const existeDeja = await Utilisateur.findOne({ email: String(email).toLowerCase().trim() });
     if (existeDeja) {
-      return res.status(409).json({ success: false, message: 'Cet adresse e-mail est déjà utilisée.' });
+      return res.status(409).json({ success: false, message: 'Cette adresse e-mail est déjà utilisée.' });
     }
 
     if (targetEntrepriseId) {
       const entreprise = await Entreprise.findById(targetEntrepriseId);
-      if (entreprise) {
-        const roleFilter = { $in: [targetRole, targetRole.toLowerCase()] };
+      if (!entreprise) {
+        return res.status(404).json({ success: false, message: 'Entreprise introuvable.' });
+      }
 
-        if (targetRole === 'ADMIN') {
-          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: roleFilter });
-          const max = entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5;
-          if (count >= max) {
-            const io = req.app?.get?.('io');
-            if (io) {
-              io.emit('quota:atteint', {
-                entrepriseId: targetEntrepriseId,
-                entrepriseNom: entreprise.nom,
-                roleTargeted: 'ADMIN',
-                currentCount: count,
-                maxAllowed: max,
-                adminId: createur?._id || null,
-              });
-            }
-            return res.status(403).json({
-              success: false,
-              quotaAtteint: true,
-              roleTargeted: 'ADMIN',
-              currentCount: count,
-              maxAllowed: max,
-              entrepriseNom: entreprise.nom,
-              message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
-            });
-          }
-        } else {
-          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: roleFilter });
-          const max = entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20;
-          if (count >= max) {
-            const io = req.app?.get?.('io');
-            if (io) {
-              io.emit('quota:atteint', {
-                entrepriseId: targetEntrepriseId,
-                entrepriseNom: entreprise.nom,
-                roleTargeted: targetRole,
-                currentCount: count,
-                maxAllowed: max,
-                adminId: createur?._id || null,
-              });
-            }
-            return res.status(403).json({
-              success: false,
-              quotaAtteint: true,
-              roleTargeted: targetRole,
-              currentCount: count,
-              maxAllowed: max,
-              entrepriseNom: entreprise.nom,
-              message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
-            });
-          }
+      const roleFilter = { $regex: new RegExp(`^${targetRole.trim()}$`, 'i') };
+      const entIdStr = String(targetEntrepriseId);
+      const entIdObj = mongoose.Types.ObjectId.isValid(entIdStr) ? new mongoose.Types.ObjectId(entIdStr) : entIdStr;
+      const entrepriseFilter = { $in: [entIdStr, entIdObj] };
+
+      const count = await Utilisateur.countDocuments({ entrepriseId: entrepriseFilter, role: roleFilter });
+
+      const maxAllowed = targetRole === 'ADMIN'
+        ? (entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5)
+        : (entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20);
+
+      if (count >= maxAllowed) {
+        const io = req.app?.get?.('io');
+        if (io) {
+          io.emit('quota:atteint', {
+            entrepriseId: targetEntrepriseId,
+            entrepriseNom: entreprise.nom,
+            roleTargeted: targetRole,
+            currentCount: count,
+            maxAllowed: maxAllowed,
+            adminId: createur?._id || null,
+          });
         }
+
+        return res.status(400).json({
+          success: false,
+          quotaAtteint: true,
+          roleTargeted: targetRole,
+          currentCount: count,
+          maxAllowed: maxAllowed,
+          entrepriseNom: entreprise.nom,
+          message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
+        });
       }
     }
 

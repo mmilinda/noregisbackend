@@ -11,6 +11,7 @@ router.get('/profil',      authentifier, monProfil);
 router.put('/profil',      authentifier, mettreAJourProfil);           // Mise à jour de son propre profil
 router.get('/quota-statut', authentifier, estAdmin, obtenirStatutQuota);
 router.get('/users',       authentifier, estAdmin, listerUtilisateurs);
+router.post('/users',      authentifier, estAdmin, register);
 router.put('/users/:id',   authentifier, estAdmin, mettreAJourProfil); // Admin met à jour le profil d'un agent
 router.put('/users/:id/reset-password', authentifier, estAdmin, reinitialiserMotDePasse);
 router.put('/users/:id/toggle', authentifier, estAdmin, toggleActif);
