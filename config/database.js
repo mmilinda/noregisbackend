@@ -21,6 +21,17 @@ const connectDB = async () => {
   try {
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
     console.log('✅ Base de données MongoDB Atlas connectée avec succès');
+
+    // Alignement automatique des quotas d'entreprises existantes (max 4 agents, max 2 admins)
+    try {
+      const Entreprise = require('../models/Entreprise');
+      await Entreprise.updateMany(
+        { $or: [{ maxAgents: { $gt: 4 } }, { maxAgents: 20 }, { maxAdmins: { $gt: 2 } }, { maxAdmins: 5 }, { maxAgents: { $exists: false } }] },
+        { $set: { maxAgents: 4, maxAdmins: 2 } }
+      );
+    } catch (e) {
+      // Ignorer silencieusement si la collection n'est pas encore créée
+    }
   } catch (err) {
     console.warn('⚠️ Connection MongoDB non disponible (Le serveur continue de fonctionner pour l\'OCR Gemini) :', err.message);
   }

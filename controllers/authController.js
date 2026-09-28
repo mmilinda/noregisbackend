@@ -249,11 +249,14 @@ const register = async (req, res) => {
       // Utilisation directe de Utilisateur.collection.countDocuments pour compter tous les BSON types d'entrepriseId (ObjectId et String)
       const count = await Utilisateur.collection.countDocuments({ entrepriseId: entrepriseFilter, role: roleFilter });
 
-      const maxAllowed = targetRole === 'ADMIN'
-        ? (entreprise.maxAdmins !== undefined && entreprise.maxAdmins !== null ? Number(entreprise.maxAdmins) : 1)
-        : (entreprise.maxAgents !== undefined && entreprise.maxAgents !== null ? Number(entreprise.maxAgents) : 1);
+      const rawMaxAdmins = entreprise.maxAdmins !== undefined && entreprise.maxAdmins !== null ? Number(entreprise.maxAdmins) : 2;
+      const rawMaxAgents = entreprise.maxAgents !== undefined && entreprise.maxAgents !== null ? Number(entreprise.maxAgents) : 4;
 
-      console.log(`🔍 [REGISTER QUOTA CHECK] Entreprise: "${entreprise.nom}" (${entreprise._id}) | Rôle: ${targetRole} | Actuels: ${count} | Quota SuperAdmin: ${maxAllowed}`);
+      const maxAllowed = targetRole === 'ADMIN'
+        ? Math.min(rawMaxAdmins > 2 ? 2 : rawMaxAdmins, 2)
+        : Math.min(rawMaxAgents > 4 ? 4 : rawMaxAgents, 4);
+
+      console.log(`🔍 [REGISTER QUOTA CHECK] Entreprise: "${entreprise.nom}" (${entreprise._id}) | Rôle: ${targetRole} | Actuels: ${count} | Quota effectif: ${maxAllowed}`);
 
       if (count >= maxAllowed) {
         console.warn(`⚠️ [QUOTA ATTEINT] Entreprise "${entreprise.nom}" (${entreprise._id}) a atteint son quota (${count}/${maxAllowed}). Bloqué.`);
