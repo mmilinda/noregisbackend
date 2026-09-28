@@ -164,11 +164,14 @@ const register = async (req, res) => {
     }
 
     let createur = req.utilisateur;
-    if (!createur && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    if (!createur && req.headers.authorization) {
       try {
-        const token = req.headers.authorization.split(' ')[1];
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        createur = await Utilisateur.findById(decoded.id).populate('entrepriseId');
+        const authHeader = req.headers.authorization;
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        if (token) {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          createur = await Utilisateur.findById(decoded.id).populate('entrepriseId');
+        }
       } catch (e) {
         // Ignorer l'erreur d'extraction si le token est invalide
       }
@@ -223,7 +226,11 @@ const register = async (req, res) => {
         ? (entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5)
         : (entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20);
 
+      console.log(`🔍 [REGISTER QUOTA CHECK] Entreprise: "${entreprise.nom}" (${targetEntrepriseId}) | Rôle: ${targetRole} | Actuels: ${count} | Max: ${maxAllowed}`);
+
       if (count >= maxAllowed) {
+        console.warn(`⚠️ [QUOTA ATTEINT] Entreprise "${entreprise.nom}" (${targetEntrepriseId}) a atteint son quota (${count}/${maxAllowed}). Bloqué.`);
+
         const io = req.app?.get?.('io');
         if (io) {
           io.emit('quota:atteint', {
