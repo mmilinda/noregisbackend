@@ -204,6 +204,11 @@ const register = async (req, res) => {
       }
     }
 
+    // Un compte agent doit impérativement être rattaché à une entreprise
+    if (targetRole === 'AGENT' && !targetEntrepriseId) {
+      return res.status(400).json({ success: false, message: 'L\'identifiant de l\'entreprise est requis pour créer un compte agent.' });
+    }
+
     const existeDeja = await Utilisateur.findOne({ email: String(email).toLowerCase().trim() });
     if (existeDeja) {
       return res.status(409).json({ success: false, message: 'Cette adresse e-mail est déjà utilisée.' });
@@ -216,25 +221,25 @@ const register = async (req, res) => {
       }
 
       const roleFilter = { $regex: new RegExp(`^${targetRole.trim()}$`, 'i') };
-      const entIdStr = String(targetEntrepriseId);
-      const entIdObj = mongoose.Types.ObjectId.isValid(entIdStr) ? new mongoose.Types.ObjectId(entIdStr) : entIdStr;
-      const entrepriseFilter = { $in: [entIdStr, entIdObj] };
+      const entIdStr = String(entreprise._id);
+      const entIdObj = entreprise._id;
+      const entrepriseFilter = { $in: [entIdObj, entIdStr] };
 
       const count = await Utilisateur.countDocuments({ entrepriseId: entrepriseFilter, role: roleFilter });
 
       const maxAllowed = targetRole === 'ADMIN'
-        ? (entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5)
-        : (entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20);
+        ? (entreprise.maxAdmins !== undefined && entreprise.maxAdmins !== null ? Number(entreprise.maxAdmins) : 5)
+        : (entreprise.maxAgents !== undefined && entreprise.maxAgents !== null ? Number(entreprise.maxAgents) : 20);
 
-      console.log(`🔍 [REGISTER QUOTA CHECK] Entreprise: "${entreprise.nom}" (${targetEntrepriseId}) | Rôle: ${targetRole} | Actuels: ${count} | Max: ${maxAllowed}`);
+      console.log(`🔍 [REGISTER QUOTA CHECK] Entreprise: "${entreprise.nom}" (${entreprise._id}) | Rôle: ${targetRole} | Actuels: ${count} | Max: ${maxAllowed}`);
 
       if (count >= maxAllowed) {
-        console.warn(`⚠️ [QUOTA ATTEINT] Entreprise "${entreprise.nom}" (${targetEntrepriseId}) a atteint son quota (${count}/${maxAllowed}). Bloqué.`);
+        console.warn(`⚠️ [QUOTA ATTEINT] Entreprise "${entreprise.nom}" (${entreprise._id}) a atteint son quota (${count}/${maxAllowed}). Bloqué.`);
 
         const io = req.app?.get?.('io');
         if (io) {
           io.emit('quota:atteint', {
-            entrepriseId: targetEntrepriseId,
+            entrepriseId: String(entreprise._id),
             entrepriseNom: entreprise.nom,
             roleTargeted: targetRole,
             currentCount: count,
