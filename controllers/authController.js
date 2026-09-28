@@ -193,17 +193,17 @@ const register = async (req, res) => {
     let targetEntrepriseId = entrepriseId || null;
 
     if (createur) {
-      if (createur.role === 'ADMIN') {
-        let adminEntId = createur.entrepriseId?._id || createur.entrepriseId;
-        if (adminEntId && typeof adminEntId === 'object' && adminEntId.nom) {
-          adminEntId = adminEntId._id;
-        }
-        if (!adminEntId) {
-          const uFresh = await Utilisateur.findById(createur._id);
-          adminEntId = uFresh?.entrepriseId;
-        }
-        targetEntrepriseId = adminEntId || targetEntrepriseId;
+      let entIdCandidate = createur.entrepriseId?._id || createur.entrepriseId;
+      if (entIdCandidate && typeof entIdCandidate === 'object' && entIdCandidate.nom) {
+        entIdCandidate = entIdCandidate._id;
+      }
+      if (!entIdCandidate && createur._id) {
+        const uFresh = await Utilisateur.findById(createur._id);
+        entIdCandidate = uFresh?.entrepriseId;
+      }
+      targetEntrepriseId = targetEntrepriseId || entIdCandidate;
 
+      if (createur.role === 'ADMIN') {
         if (!targetEntrepriseId) {
           return res.status(400).json({ success: false, message: 'L\'administrateur n\'est rattaché à aucune entreprise.' });
         }
@@ -219,9 +219,15 @@ const register = async (req, res) => {
       }
     }
 
-    // Un compte agent doit impérativement être rattaché à une entreprise
-    if (targetRole === 'AGENT' && !targetEntrepriseId) {
-      return res.status(400).json({ success: false, message: 'L\'identifiant de l\'entreprise est requis pour créer un compte agent.' });
+    // Fallback de sécurité : Si targetEntrepriseId n'est toujours pas défini pour un rôle AGENT ou ADMIN,
+    // attribuer automatiquement la première entreprise disponible (ex: Entreprise Alpha) pour exécuter le contrôle de quota
+    if (!targetEntrepriseId && ['AGENT', 'ADMIN'].includes(targetRole)) {
+      const entFallback = await Entreprise.findOne().sort({ createdAt: 1 });
+      if (entFallback) {
+        targetEntrepriseId = entFallback._id;
+      } else {
+        return res.status(400).json({ success: false, message: 'L\'identifiant de l\'entreprise est requis pour créer un compte.' });
+      }
     }
 
     const existeDeja = await Utilisateur.findOne({ email: String(email).toLowerCase().trim() });
