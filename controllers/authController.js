@@ -187,8 +187,16 @@ const register = async (req, res) => {
 
     if (createur) {
       if (createur.role === 'ADMIN') {
-        const adminEntId = createur.entrepriseId?._id || createur.entrepriseId;
+        let adminEntId = createur.entrepriseId?._id || createur.entrepriseId;
+        if (adminEntId && typeof adminEntId === 'object' && adminEntId.nom) {
+          adminEntId = adminEntId._id;
+        }
+        if (!adminEntId) {
+          const uFresh = await Utilisateur.findById(createur._id);
+          adminEntId = uFresh?.entrepriseId;
+        }
         targetEntrepriseId = adminEntId || targetEntrepriseId;
+
         if (!targetEntrepriseId) {
           return res.status(400).json({ success: false, message: 'L\'administrateur n\'est rattaché à aucune entreprise.' });
         }
