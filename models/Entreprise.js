@@ -8,8 +8,8 @@ const entrepriseSchema = new mongoose.Schema({
   emailContact: { type: String, maxlength: 100, default: '' },
   statut:       { type: String, enum: ['ACTIF', 'SUSPENDU', 'DESACTIVE'], default: 'ACTIF' },
   secteur:      { type: String, default: 'Maritime / Logistique' },
-  maxAdmins:    { type: Number, default: 5, min: 1 },
-  maxAgents:    { type: Number, default: 20, min: 1 },
+  maxAdmins:    { type: Number, default: 2, min: 1 },
+  maxAgents:    { type: Number, default: 4, min: 1 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Entreprise', entrepriseSchema);

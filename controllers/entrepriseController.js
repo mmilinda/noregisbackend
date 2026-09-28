@@ -20,8 +20,8 @@ const creerEntreprise = async (req, res) => {
       emailContact: emailContact || '',
       secteur: secteur || 'Maritime / Logistique',
       statut: 'ACTIF',
-      maxAdmins: maxAdmins ? Math.max(1, Number(maxAdmins)) : 5,
-      maxAgents: maxAgents ? Math.max(1, Number(maxAgents)) : 20,
+      maxAdmins: maxAdmins ? Math.max(1, Number(maxAdmins)) : 2,
+      maxAgents: maxAgents ? Math.max(1, Number(maxAgents)) : 4,
     });
 
     res.status(201).json({
