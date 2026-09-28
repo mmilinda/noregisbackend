@@ -173,12 +173,20 @@ const register = async (req, res) => {
       }
     }
 
-    let targetRole = role || 'AGENT';
+    // Normalisation impérative du rôle en MAJUSCULES (ex: 'agent' -> 'AGENT')
+    let targetRole = role ? String(role).toUpperCase().trim() : 'AGENT';
+    if (!['SUPER_ADMIN', 'ADMIN', 'AGENT'].includes(targetRole)) {
+      targetRole = 'AGENT';
+    }
+
     let targetEntrepriseId = entrepriseId || null;
 
     if (createur) {
       if (createur.role === 'ADMIN') {
-        targetEntrepriseId = createur.entrepriseId?._id || createur.entrepriseId;
+        targetEntrepriseId = createur.entrepriseId?._id || createur.entrepriseId || targetEntrepriseId;
+        if (!targetEntrepriseId) {
+          return res.status(400).json({ success: false, message: 'L\'administrateur n\'est rattaché à aucune entreprise.' });
+        }
         if (!['AGENT', 'ADMIN'].includes(targetRole)) {
           return res.status(400).json({ success: false, message: 'Un administrateur peut uniquement créer des rôles Agent ou Admin pour son entreprise.' });
         }
@@ -199,8 +207,10 @@ const register = async (req, res) => {
     if (targetEntrepriseId) {
       const entreprise = await Entreprise.findById(targetEntrepriseId);
       if (entreprise) {
+        const roleFilter = { $in: [targetRole, targetRole.toLowerCase()] };
+
         if (targetRole === 'ADMIN') {
-          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'ADMIN' });
+          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: roleFilter });
           const max = entreprise.maxAdmins !== undefined ? entreprise.maxAdmins : 5;
           if (count >= max) {
             const io = req.app?.get?.('io');
@@ -224,8 +234,8 @@ const register = async (req, res) => {
               message: 'Création de compte échouée car vous avez atteint votre quota de création de compte.',
             });
           }
-        } else if (targetRole === 'AGENT') {
-          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: 'AGENT' });
+        } else {
+          const count = await Utilisateur.countDocuments({ entrepriseId: targetEntrepriseId, role: roleFilter });
           const max = entreprise.maxAgents !== undefined ? entreprise.maxAgents : 20;
           if (count >= max) {
             const io = req.app?.get?.('io');
@@ -233,7 +243,7 @@ const register = async (req, res) => {
               io.emit('quota:atteint', {
                 entrepriseId: targetEntrepriseId,
                 entrepriseNom: entreprise.nom,
-                roleTargeted: 'AGENT',
+                roleTargeted: targetRole,
                 currentCount: count,
                 maxAllowed: max,
                 adminId: createur?._id || null,
@@ -242,7 +252,7 @@ const register = async (req, res) => {
             return res.status(403).json({
               success: false,
               quotaAtteint: true,
-              roleTargeted: 'AGENT',
+              roleTargeted: targetRole,
               currentCount: count,
               maxAllowed: max,
               entrepriseNom: entreprise.nom,
