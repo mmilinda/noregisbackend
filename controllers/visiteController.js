@@ -240,14 +240,23 @@ const listerVisites = async (req, res) => {
       Visite.countDocuments(filtre),
       Visite.find(filtre)
         .populate('visiteurId')
-        .populate('agentId', 'nom prenom email')
-        .populate('entrepriseId', 'nom code')
+        .populate('agentId', 'nom prenom email role')
+        .populate('entrepriseId')
         .sort({ heureEntree: -1 })
         .skip((page - 1) * limit)
         .limit(limit),
     ]);
 
-    res.json({ success: true, total, page, pages: Math.ceil(total / limit), visites });
+    const visitesEnrichies = visites.map(v => {
+      const vObj = v.toObject();
+      const ent = vObj.entrepriseId;
+      vObj.entrepriseNom = ent?.nom || 'Non spécifiée';
+      vObj.entrepriseCode = ent?.code || '';
+      vObj.entreprise = ent || null;
+      return vObj;
+    });
+
+    res.json({ success: true, total, page, pages: Math.ceil(total / limit), visites: visitesEnrichies });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -260,11 +269,20 @@ const visitesEnCours = async (req, res) => {
 
     const visites = await Visite.find(filtre)
       .populate('visiteurId')
-      .populate('agentId', 'nom prenom email')
-      .populate('entrepriseId', 'nom code')
+      .populate('agentId', 'nom prenom email role')
+      .populate('entrepriseId')
       .sort({ heureEntree: -1 });
 
-    res.json({ success: true, total: visites.length, visites });
+    const visitesEnrichies = visites.map(v => {
+      const vObj = v.toObject();
+      const ent = vObj.entrepriseId;
+      vObj.entrepriseNom = ent?.nom || 'Non spécifiée';
+      vObj.entrepriseCode = ent?.code || '';
+      vObj.entreprise = ent || null;
+      return vObj;
+    });
+
+    res.json({ success: true, total: visitesEnrichies.length, visites: visitesEnrichies });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -356,7 +374,7 @@ const creerRendezVous = async (req, res) => {
         }
       }
 
-      const entrepriseId = user?.entrepriseId?._id || user?.entrepriseId || null;
+      const entrepriseId = req.body.entrepriseId || user?.entrepriseId?._id || user?.entrepriseId || null;
 
       visiteur = await Visiteur.create({
         nom,
@@ -371,7 +389,7 @@ const creerRendezVous = async (req, res) => {
     }
 
     const agentId = user?._id || null;
-    const entrepriseId = user?.entrepriseId?._id || user?.entrepriseId || null;
+    const entrepriseId = req.body.entrepriseId || user?.entrepriseId?._id || user?.entrepriseId || visiteur?.entrepriseId || null;
 
     const meRendezVous = await Visite.create({
       visiteurId: visiteur._id,
@@ -388,18 +406,24 @@ const creerRendezVous = async (req, res) => {
 
     const rendezVousPopule = await Visite.findById(meRendezVous._id)
       .populate('visiteurId')
-      .populate('agentId', 'nom prenom email')
-      .populate('entrepriseId', 'nom code');
+      .populate('agentId', 'nom prenom email role')
+      .populate('entrepriseId');
+
+    const rendezVousObj = rendezVousPopule.toObject();
+    const ent = rendezVousObj.entrepriseId;
+    rendezVousObj.entrepriseNom = ent?.nom || 'Non spécifiée';
+    rendezVousObj.entrepriseCode = ent?.code || '';
+    rendezVousObj.entreprise = ent || null;
 
     const io = req.app.get('io');
     if (io) {
-      io.emit('rendezvous:cree', rendezVousPopule);
+      io.emit('rendezvous:cree', rendezVousObj);
     }
 
     res.status(201).json({
       success: true,
       message: 'Rendez-vous créé avec succès.',
-      rendezVous: rendezVousPopule,
+      rendezVous: rendezVousObj,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -426,14 +450,30 @@ const listerRendezVous = async (req, res) => {
       Visite.countDocuments(filtre),
       Visite.find(filtre)
         .populate('visiteurId')
-        .populate('agentId', 'nom prenom email')
-        .populate('entrepriseId', 'nom code')
+        .populate('agentId', 'nom prenom email role')
+        .populate('entrepriseId')
         .sort({ dateRendezVous: 1 })
         .skip((page - 1) * limit)
         .limit(limit),
     ]);
 
-    res.json({ success: true, total, page, pages: Math.ceil(total / limit), rendezVous });
+    const rendezVousEnrichis = rendezVous.map(rdv => {
+      const rdvObj = rdv.toObject();
+      const ent = rdvObj.entrepriseId;
+      rdvObj.entrepriseNom = ent?.nom || 'Non spécifiée';
+      rdvObj.entrepriseCode = ent?.code || '';
+      rdvObj.entreprise = ent || null;
+      return rdvObj;
+    });
+
+    res.json({
+      success: true,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      rendezVous: rendezVousEnrichis,
+      visites: rendezVousEnrichis
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
