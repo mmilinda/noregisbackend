@@ -5,7 +5,11 @@ const {
   enregistrerSortie,
   listerVisites,
   visitesEnCours,
-  supprimerVisite
+  supprimerVisite,
+  creerRendezVous,
+  listerRendezVous,
+  validerEntreeRendezVous,
+  annulerRendezVous,
 } = require('../controllers/visiteController');
 const { authentifier, estAdmin } = require('../middleware/auth');
 
@@ -13,8 +17,12 @@ router.use(authentifier);
 
 router.get('/', listerVisites);
 router.get('/en-cours', visitesEnCours);
+router.get('/rendez-vous', listerRendezVous);
 router.post('/entree', enregistrerEntree);
+router.post('/rendez-vous', creerRendezVous);
 router.post('/sortie/:id', enregistrerSortie);
+router.put('/:id/valider-rendez-vous', validerEntreeRendezVous);
+router.patch('/:id/annuler-rendez-vous', annulerRendezVous);
 router.delete('/:id', estAdmin, supprimerVisite);
 
 module.exports = router;
