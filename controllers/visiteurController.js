@@ -20,41 +20,54 @@ const construireRegexTelephone = (queryTel) => {
  */
 const rechercherParNIN = async (req, res) => {
   try {
-    const queryNin = req.query.nin || req.query.q || req.query.telephone || req.query.phone;
-    if (!queryNin || !String(queryNin).trim()) {
-      return res.status(400).json({ success: false, message: 'Le NIN est requis.', visiteurs: [] });
+    const queryNin = req.query.nin || req.query.q || req.query.query || req.query.telephone || req.query.phone;
+
+    let filtre = {};
+
+    if (queryNin && String(queryNin).trim().length > 0) {
+      const rawQuery = String(queryNin).trim();
+      const digitsOnly = rawQuery.replace(/\D/g, '');
+
+      const regexPattern = digitsOnly.length > 0
+        ? digitsOnly.split('').join('[\\s.-]*')
+        : rawQuery;
+
+      filtre = {
+        $or: [
+          { nin: { $regex: regexPattern, $options: 'i' } },
+          { nin: { $regex: rawQuery, $options: 'i' } },
+          { numeroPiece: { $regex: rawQuery, $options: 'i' } },
+          { telephone: { $regex: rawQuery, $options: 'i' } }
+        ]
+      };
+    } else {
+      // Si aucun filtre n'est saisi, retourner les derniers visiteurs enregistrés ayant un NIN
+      filtre = { nin: { $ne: null, $exists: true, $regex: '\\S+' } };
     }
 
-    const rawQuery = String(queryNin).trim();
-    const digitsOnly = rawQuery.replace(/\D/g, '');
+    const visiteurs = await Visiteur.find(filtre).sort({ createdAt: -1 }).limit(20);
 
-    const regexPattern = digitsOnly.length > 0
-      ? digitsOnly.split('').join('[\\s.-]*')
-      : rawQuery;
+    const listeNins = visiteurs
+      .filter(v => v.nin && String(v.nin).trim())
+      .map(v => ({
+        id: v._id,
+        nin: v.nin,
+        nom: v.nom,
+        prenom: v.prenom,
+        numeroPiece: v.numeroPiece,
+        telephone: v.telephone,
+        label: `${v.nin} - ${v.prenom} ${v.nom}`
+      }));
 
-    const filtre = {
-      $or: [
-        { nin: { $regex: regexPattern, $options: 'i' } },
-        { nin: { $regex: rawQuery, $options: 'i' } },
-        { numeroPiece: { $regex: rawQuery, $options: 'i' } },
-      ]
-    };
-
-    const visiteurs = await Visiteur.find(filtre).sort({ createdAt: -1 }).limit(10);
-
-    if (!visiteurs || visiteurs.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Aucun visiteur trouvé avec ce NIN.',
-        visiteurs: []
-      });
-    }
+    const tableauSimpleNins = [...new Set(visiteurs.map(v => v.nin).filter(Boolean))];
 
     return res.json({
       success: true,
-      message: 'Visiteur(s) existant(s) trouvé(s) dans la base de données.',
-      visiteur: visiteurs[0],
-      visiteurs
+      message: visiteurs.length > 0 ? 'Visiteur(s) trouvé(s).' : 'Aucun visiteur trouvé.',
+      visiteur: visiteurs[0] || null,
+      visiteurs,
+      nins: listeNins,
+      ninsList: tableauSimpleNins
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

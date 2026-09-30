@@ -11,6 +11,7 @@ const {
   validerEntreeRendezVous,
   annulerRendezVous,
 } = require('../controllers/visiteController');
+const { rechercherParNIN } = require('../controllers/visiteurController');
 const { authentifier, estAdmin } = require('../middleware/auth');
 
 router.use(authentifier);
@@ -18,6 +19,7 @@ router.use(authentifier);
 router.get('/', listerVisites);
 router.get('/en-cours', visitesEnCours);
 router.get('/rendez-vous', listerRendezVous);
+router.get('/recherche/nin', rechercherParNIN);
 router.post('/entree', enregistrerEntree);
 router.post('/rendez-vous', creerRendezVous);
 router.post('/sortie/:id', enregistrerSortie);
