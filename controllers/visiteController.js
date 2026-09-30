@@ -1,5 +1,53 @@
 const mongoose = require('mongoose');
-const { Visite, Visiteur } = require('../models');
+const { Visite, Visiteur, Utilisateur, Entreprise } = require('../models');
+
+/**
+ * Tente de résoudre l'entreprise associée à une visite ou un rendez-vous si entrepriseId est nul.
+ * Effectue une réparation silencieuse en BDD pour garantir l'intégrité multi-tenant.
+ */
+const resoudreEntreprise = async (visiteDoc) => {
+  if (!visiteDoc) return null;
+
+  let entObj = null;
+
+  if (visiteDoc.entrepriseId && typeof visiteDoc.entrepriseId === 'object' && visiteDoc.entrepriseId.nom) {
+    entObj = visiteDoc.entrepriseId;
+  } else if (visiteDoc.entrepriseId && mongoose.Types.ObjectId.isValid(visiteDoc.entrepriseId)) {
+    entObj = await Entreprise.findById(visiteDoc.entrepriseId);
+  }
+
+  // 1. Tenter la résolution par l'agent créateur / hôte
+  if (!entObj && visiteDoc.agentId) {
+    const agent = typeof visiteDoc.agentId === 'object' ? visiteDoc.agentId : await Utilisateur.findById(visiteDoc.agentId);
+    const agentEntId = agent?.entrepriseId?._id || agent?.entrepriseId;
+    if (agentEntId) {
+      entObj = await Entreprise.findById(agentEntId);
+    }
+  }
+
+  // 2. Tenter la résolution par le visiteur rattaché
+  if (!entObj && visiteDoc.visiteurId) {
+    const visiteur = typeof visiteDoc.visiteurId === 'object' ? visiteDoc.visiteurId : await Visiteur.findById(visiteDoc.visiteurId);
+    const visiteurEntId = visiteur?.entrepriseId?._id || visiteur?.entrepriseId;
+    if (visiteurEntId) {
+      entObj = await Entreprise.findById(visiteurEntId);
+    }
+  }
+
+  // 3. Fallback sur la première entreprise active de la base de données
+  if (!entObj) {
+    entObj = await Entreprise.findOne({ statut: 'ACTIF' }).sort({ createdAt: 1 }) || await Entreprise.findOne().sort({ createdAt: 1 });
+  }
+
+  // Réparation silencieuse du document en BDD
+  if (entObj && visiteDoc._id) {
+    if (!visiteDoc.entrepriseId || String(visiteDoc.entrepriseId) !== String(entObj._id)) {
+      await Visite.updateOne({ _id: visiteDoc._id }, { entrepriseId: entObj._id }).catch(() => {});
+    }
+  }
+
+  return entObj;
+};
 
 const construireFiltrePérimètre = (req) => {
   const user = req.utilisateur;
@@ -240,21 +288,29 @@ const listerVisites = async (req, res) => {
       Visite.countDocuments(filtre),
       Visite.find(filtre)
         .populate('visiteurId')
-        .populate('agentId', 'nom prenom email role')
+        .populate('agentId', 'nom prenom email role entrepriseId')
         .populate('entrepriseId')
         .sort({ heureEntree: -1 })
         .skip((page - 1) * limit)
         .limit(limit),
     ]);
 
-    const visitesEnrichies = visites.map(v => {
-      const vObj = v.toObject();
-      const ent = vObj.entrepriseId;
-      vObj.entrepriseNom = ent?.nom || 'Non spécifiée';
-      vObj.entrepriseCode = ent?.code || '';
-      vObj.entreprise = ent || null;
-      return vObj;
-    });
+    const visitesEnrichies = await Promise.all(
+      visites.map(async v => {
+        const vObj = v.toObject();
+        let ent = vObj.entrepriseId;
+
+        if (!ent || !ent.nom) {
+          ent = await resoudreEntreprise(v);
+        }
+
+        vObj.entrepriseId = ent || null;
+        vObj.entrepriseNom = ent?.nom || 'Entreprise Principale';
+        vObj.entrepriseCode = ent?.code || '';
+        vObj.entreprise = ent || null;
+        return vObj;
+      })
+    );
 
     res.json({ success: true, total, page, pages: Math.ceil(total / limit), visites: visitesEnrichies });
   } catch (err) {
@@ -269,18 +325,26 @@ const visitesEnCours = async (req, res) => {
 
     const visites = await Visite.find(filtre)
       .populate('visiteurId')
-      .populate('agentId', 'nom prenom email role')
+      .populate('agentId', 'nom prenom email role entrepriseId')
       .populate('entrepriseId')
       .sort({ heureEntree: -1 });
 
-    const visitesEnrichies = visites.map(v => {
-      const vObj = v.toObject();
-      const ent = vObj.entrepriseId;
-      vObj.entrepriseNom = ent?.nom || 'Non spécifiée';
-      vObj.entrepriseCode = ent?.code || '';
-      vObj.entreprise = ent || null;
-      return vObj;
-    });
+    const visitesEnrichies = await Promise.all(
+      visites.map(async v => {
+        const vObj = v.toObject();
+        let ent = vObj.entrepriseId;
+
+        if (!ent || !ent.nom) {
+          ent = await resoudreEntreprise(v);
+        }
+
+        vObj.entrepriseId = ent || null;
+        vObj.entrepriseNom = ent?.nom || 'Entreprise Principale';
+        vObj.entrepriseCode = ent?.code || '';
+        vObj.entreprise = ent || null;
+        return vObj;
+      })
+    );
 
     res.json({ success: true, total: visitesEnrichies.length, visites: visitesEnrichies });
   } catch (err) {
@@ -389,12 +453,16 @@ const creerRendezVous = async (req, res) => {
     }
 
     const agentId = user?._id || null;
-    const entrepriseId = req.body.entrepriseId || user?.entrepriseId?._id || user?.entrepriseId || visiteur?.entrepriseId || null;
+    let targetEntrepriseId = req.body.entrepriseId || user?.entrepriseId?._id || user?.entrepriseId || visiteur?.entrepriseId || null;
+    if (!targetEntrepriseId) {
+      const premiereEnt = await Entreprise.findOne({ statut: 'ACTIF' }).sort({ createdAt: 1 }) || await Entreprise.findOne().sort({ createdAt: 1 });
+      if (premiereEnt) targetEntrepriseId = premiereEnt._id;
+    }
 
     const meRendezVous = await Visite.create({
       visiteurId: visiteur._id,
       agentId,
-      entrepriseId,
+      entrepriseId: targetEntrepriseId,
       personneVisitee,
       service,
       motif,
@@ -406,12 +474,17 @@ const creerRendezVous = async (req, res) => {
 
     const rendezVousPopule = await Visite.findById(meRendezVous._id)
       .populate('visiteurId')
-      .populate('agentId', 'nom prenom email role')
+      .populate('agentId', 'nom prenom email role entrepriseId')
       .populate('entrepriseId');
 
+    let ent = rendezVousPopule.entrepriseId;
+    if (!ent || !ent.nom) {
+      ent = await resoudreEntreprise(rendezVousPopule);
+    }
+
     const rendezVousObj = rendezVousPopule.toObject();
-    const ent = rendezVousObj.entrepriseId;
-    rendezVousObj.entrepriseNom = ent?.nom || 'Non spécifiée';
+    rendezVousObj.entrepriseId = ent || null;
+    rendezVousObj.entrepriseNom = ent?.nom || 'Entreprise Principale';
     rendezVousObj.entrepriseCode = ent?.code || '';
     rendezVousObj.entreprise = ent || null;
 
@@ -450,21 +523,29 @@ const listerRendezVous = async (req, res) => {
       Visite.countDocuments(filtre),
       Visite.find(filtre)
         .populate('visiteurId')
-        .populate('agentId', 'nom prenom email role')
+        .populate('agentId', 'nom prenom email role entrepriseId')
         .populate('entrepriseId')
         .sort({ dateRendezVous: 1 })
         .skip((page - 1) * limit)
         .limit(limit),
     ]);
 
-    const rendezVousEnrichis = rendezVous.map(rdv => {
-      const rdvObj = rdv.toObject();
-      const ent = rdvObj.entrepriseId;
-      rdvObj.entrepriseNom = ent?.nom || 'Non spécifiée';
-      rdvObj.entrepriseCode = ent?.code || '';
-      rdvObj.entreprise = ent || null;
-      return rdvObj;
-    });
+    const rendezVousEnrichis = await Promise.all(
+      rendezVous.map(async rdv => {
+        const rdvObj = rdv.toObject();
+        let ent = rdvObj.entrepriseId;
+
+        if (!ent || !ent.nom) {
+          ent = await resoudreEntreprise(rdv);
+        }
+
+        rdvObj.entrepriseId = ent || null;
+        rdvObj.entrepriseNom = ent?.nom || 'Entreprise Principale';
+        rdvObj.entrepriseCode = ent?.code || '';
+        rdvObj.entreprise = ent || null;
+        return rdvObj;
+      })
+    );
 
     res.json({
       success: true,
