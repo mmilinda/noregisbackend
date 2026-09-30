@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { Visite, Visiteur } = require('../models');
 
 const construireFiltrePérimètre = (req) => {
@@ -35,13 +36,93 @@ const construireFiltrePérimètre = (req) => {
 
 const enregistrerEntree = async (req, res) => {
   try {
-    const { visiteurId, personneVisitee, service, motif } = req.body;
+    const { visiteurId, personneVisitee, service, motif, rendezVousId, visiteId } = req.body;
     const user = req.utilisateur;
 
-    const visiteur = await Visiteur.findById(visiteurId);
-    if (!visiteur) return res.status(404).json({ success: false, message: 'Visiteur introuvable.' });
+    let targetVisiteurId = visiteurId || req.body.visiteur;
 
-    const visiteEnCours = await Visite.findOne({ visiteurId, statut: 'EN_COURS' });
+    // Si le frontend transmet un objet complet (ex: { _id: '...', nom: '...' })
+    if (targetVisiteurId && typeof targetVisiteurId === 'object') {
+      targetVisiteurId = targetVisiteurId._id || targetVisiteurId.id;
+    }
+
+    let visiteur = null;
+
+    // 1. Recherche directe par ID de visiteur
+    if (targetVisiteurId && mongoose.Types.ObjectId.isValid(targetVisiteurId)) {
+      visiteur = await Visiteur.findById(targetVisiteurId);
+    }
+
+    // 2. Si non trouvé par ID direct, vérifier si l'ID transmis correspond à un Rendez-vous / Visite
+    const potentialRdvId = rendezVousId || visiteId || req.body.id || (targetVisiteurId && !visiteur ? targetVisiteurId : null);
+    if (!visiteur && potentialRdvId && mongoose.Types.ObjectId.isValid(potentialRdvId)) {
+      const meRendezVous = await Visite.findById(potentialRdvId);
+      if (meRendezVous) {
+        if (meRendezVous.visiteurId) {
+          visiteur = await Visiteur.findById(meRendezVous.visiteurId);
+        }
+
+        // Si la visite trouvée est un rendez-vous 'PROGRAMME', on valide ce rendez-vous directement
+        if (meRendezVous.statut === 'PROGRAMME') {
+          const visiteEnCours = await Visite.findOne({
+            visiteurId: meRendezVous.visiteurId,
+            statut: 'EN_COURS',
+            _id: { $ne: meRendezVous._id }
+          });
+
+          if (visiteEnCours) {
+            return res.status(409).json({
+              success: false,
+              message: "Ce visiteur a déjà une visite en cours.",
+              visiteEnCours
+            });
+          }
+
+          meRendezVous.statut = 'EN_COURS';
+          meRendezVous.heureEntree = new Date();
+          if (personneVisitee) meRendezVous.personneVisitee = personneVisitee;
+          if (service) meRendezVous.service = service;
+          if (motif) meRendezVous.motif = motif;
+          await meRendezVous.save();
+
+          const completeVisite = await Visite.findById(meRendezVous._id)
+            .populate('visiteurId')
+            .populate('agentId', 'nom prenom email')
+            .populate('entrepriseId', 'nom code');
+
+          const io = req.app.get('io');
+          if (io) {
+            io.emit('visite:entree', completeVisite);
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: `Entrée du rendez-vous enregistrée à ${new Date().toLocaleTimeString('fr-SN')}`,
+            visite: completeVisite,
+          });
+        }
+      }
+    }
+
+    // 3. Fallback de recherche par NIN, numeroPiece ou telephone
+    if (!visiteur && (req.body.nin || req.body.numeroPiece || req.body.telephone)) {
+      const searchConditions = [];
+      if (req.body.nin && String(req.body.nin).trim()) searchConditions.push({ nin: String(req.body.nin).trim() });
+      if (req.body.numeroPiece && String(req.body.numeroPiece).trim()) searchConditions.push({ numeroPiece: String(req.body.numeroPiece).trim() });
+      if (req.body.telephone && String(req.body.telephone).trim()) searchConditions.push({ telephone: String(req.body.telephone).trim() });
+
+      if (searchConditions.length > 0) {
+        visiteur = await Visiteur.findOne({ $or: searchConditions });
+      }
+    }
+
+    if (!visiteur) {
+      return res.status(404).json({ success: false, message: 'Visiteur introuvable.' });
+    }
+
+    const effectiveVisiteurId = visiteur._id;
+
+    const visiteEnCours = await Visite.findOne({ visiteurId: effectiveVisiteurId, statut: 'EN_COURS' });
     if (visiteEnCours) {
       return res.status(409).json({ success: false, message: "Ce visiteur est déjà à l'intérieur.", visiteEnCours });
     }
@@ -50,11 +131,11 @@ const enregistrerEntree = async (req, res) => {
     const entrepriseId = user?.entrepriseId?._id || user?.entrepriseId || null;
 
     const visite = await Visite.create({
-      visiteurId,
+      visiteurId: effectiveVisiteurId,
       agentId,
       entrepriseId,
-      personneVisitee,
-      service,
+      personneVisitee: personneVisitee || 'Accueil / Réception',
+      service: service || 'Direction',
       motif,
       heureEntree: new Date(),
       statut: 'EN_COURS',
