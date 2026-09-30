@@ -64,8 +64,21 @@ const enregistrerEntree = async (req, res) => {
 
         // Si la visite trouvée est un rendez-vous 'PROGRAMME', on valide ce rendez-vous directement
         if (meRendezVous.statut === 'PROGRAMME') {
+          if (!visiteur) {
+            const entrepriseId = user?.entrepriseId?._id || user?.entrepriseId || meRendezVous.entrepriseId || null;
+            visiteur = await Visiteur.create({
+              nom: req.body.nom || req.body.visiteurNom || 'Visiteur',
+              prenom: req.body.prenom || req.body.visiteurPrenom || 'RDV',
+              numeroPiece: `RDV-${Date.now()}`,
+              typePiece: 'CNI',
+              entrepriseId,
+              creeParAgentId: user?._id || null,
+            });
+            meRendezVous.visiteurId = visiteur._id;
+          }
+
           const visiteEnCours = await Visite.findOne({
-            visiteurId: meRendezVous.visiteurId,
+            visiteurId: visiteur._id,
             statut: 'EN_COURS',
             _id: { $ne: meRendezVous._id }
           });
@@ -113,6 +126,26 @@ const enregistrerEntree = async (req, res) => {
 
       if (searchConditions.length > 0) {
         visiteur = await Visiteur.findOne({ $or: searchConditions });
+      }
+    }
+
+    // 4. Auto-création de secours si des infos visiteur sont fournies
+    if (!visiteur) {
+      const nom = req.body.nom || req.body.visiteurNom || (typeof req.body.visiteur === 'string' ? req.body.visiteur : null);
+      const prenom = req.body.prenom || req.body.visiteurPrenom || '';
+
+      if (nom || prenom) {
+        const entrepriseId = user?.entrepriseId?._id || user?.entrepriseId || null;
+        visiteur = await Visiteur.create({
+          nom: nom || 'Visiteur',
+          prenom: prenom || 'Inconnu',
+          telephone: req.body.telephone || null,
+          numeroPiece: req.body.numeroPiece || `VIS-${Date.now()}`,
+          nin: req.body.nin || null,
+          typePiece: req.body.typePiece || 'CNI',
+          entrepriseId,
+          creeParAgentId: user?._id || null,
+        });
       }
     }
 
@@ -408,6 +441,7 @@ const listerRendezVous = async (req, res) => {
 
 const validerEntreeRendezVous = async (req, res) => {
   try {
+    const user = req.utilisateur;
     const meRendezVous = await Visite.findById(req.params.id);
 
     if (!meRendezVous) {
@@ -421,9 +455,32 @@ const validerEntreeRendezVous = async (req, res) => {
       });
     }
 
+    let visiteur = null;
+    if (meRendezVous.visiteurId) {
+      visiteur = await Visiteur.findById(meRendezVous.visiteurId);
+    }
+
+    if (!visiteur) {
+      const nom = req.body.nom || req.body.visiteurNom || 'Visiteur';
+      const prenom = req.body.prenom || req.body.visiteurPrenom || 'RDV';
+      const entrepriseId = user?.entrepriseId?._id || user?.entrepriseId || meRendezVous.entrepriseId || null;
+
+      visiteur = await Visiteur.create({
+        nom,
+        prenom,
+        numeroPiece: `RDV-${Date.now()}`,
+        typePiece: 'CNI',
+        entrepriseId,
+        creeParAgentId: user?._id || null,
+      });
+
+      meRendezVous.visiteurId = visiteur._id;
+    }
+
     const visiteEnCours = await Visite.findOne({
-      visiteurId: meRendezVous.visiteurId,
-      statut: 'EN_COURS'
+      visiteurId: visiteur._id,
+      statut: 'EN_COURS',
+      _id: { $ne: meRendezVous._id }
     });
 
     if (visiteEnCours) {

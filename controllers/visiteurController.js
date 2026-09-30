@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { Visiteur, Visite, Document } = require('../models');
 
 /**
@@ -188,7 +189,20 @@ const listerVisiteurs = async (req, res) => {
 
 const getVisiteur = async (req, res) => {
   try {
-    const visiteur = await Visiteur.findById(req.params.id);
+    const id = req.params.id;
+    let visiteur = null;
+
+    if (id && mongoose.Types.ObjectId.isValid(id)) {
+      visiteur = await Visiteur.findById(id);
+
+      if (!visiteur) {
+        const visite = await Visite.findById(id);
+        if (visite && visite.visiteurId) {
+          visiteur = await Visiteur.findById(visite.visiteurId);
+        }
+      }
+    }
+
     if (!visiteur) return res.status(404).json({ success: false, message: 'Visiteur introuvable.' });
     const [visites, documents] = await Promise.all([
       Visite.find({ visiteurId: visiteur._id }).sort({ heureEntree: -1 }),
