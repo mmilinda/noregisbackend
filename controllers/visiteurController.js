@@ -20,12 +20,23 @@ const construireRegexTelephone = (queryTel) => {
  */
 const rechercherParNIN = async (req, res) => {
   try {
-    const queryNin = req.query.nin || req.query.q || req.query.query || req.query.telephone || req.query.phone;
+    const rawParam =
+      req.query.nin ||
+      req.query.q ||
+      req.query.query ||
+      req.query.numeroPiece ||
+      req.query.numPiece ||
+      req.query.cin ||
+      req.query.piece ||
+      req.query.telephone ||
+      req.query.phone ||
+      req.query.search ||
+      req.query.term;
 
     let filtre = {};
 
-    if (queryNin && String(queryNin).trim().length > 0) {
-      const rawQuery = String(queryNin).trim();
+    if (rawParam && String(rawParam).trim().length > 0) {
+      const rawQuery = String(rawParam).trim();
       const digitsOnly = rawQuery.replace(/\D/g, '');
 
       const regexPattern = digitsOnly.length > 0
@@ -37,29 +48,31 @@ const rechercherParNIN = async (req, res) => {
           { nin: { $regex: regexPattern, $options: 'i' } },
           { nin: { $regex: rawQuery, $options: 'i' } },
           { numeroPiece: { $regex: rawQuery, $options: 'i' } },
-          { telephone: { $regex: rawQuery, $options: 'i' } }
+          { numeroPiece: { $regex: regexPattern, $options: 'i' } },
+          { telephone: { $regex: rawQuery, $options: 'i' } },
+          { nom: { $regex: rawQuery, $options: 'i' } },
+          { prenom: { $regex: rawQuery, $options: 'i' } },
         ]
       };
     } else {
-      // Si aucun filtre n'est saisi, retourner les derniers visiteurs enregistrés ayant un NIN
-      filtre = { nin: { $ne: null, $exists: true, $regex: '\\S+' } };
+      // Si aucun filtre n'est saisi, retourner les 20 derniers visiteurs enregistrés en BDD
+      filtre = {};
     }
 
     const visiteurs = await Visiteur.find(filtre).sort({ createdAt: -1 }).limit(20);
 
-    const listeNins = visiteurs
-      .filter(v => v.nin && String(v.nin).trim())
-      .map(v => ({
-        id: v._id,
-        nin: v.nin,
-        nom: v.nom,
-        prenom: v.prenom,
-        numeroPiece: v.numeroPiece,
-        telephone: v.telephone,
-        label: `${v.nin} - ${v.prenom} ${v.nom}`
-      }));
+    const listeNins = visiteurs.map(v => ({
+      id: v._id,
+      _id: v._id,
+      nin: v.nin || v.numeroPiece || '',
+      nom: v.nom,
+      prenom: v.prenom,
+      numeroPiece: v.numeroPiece,
+      telephone: v.telephone,
+      label: `${v.nin || v.numeroPiece || 'P-ID'} - ${v.prenom} ${v.nom}`
+    }));
 
-    const tableauSimpleNins = [...new Set(visiteurs.map(v => v.nin).filter(Boolean))];
+    const tableauSimpleNins = [...new Set(visiteurs.map(v => v.nin || v.numeroPiece).filter(Boolean))];
 
     return res.json({
       success: true,
@@ -67,7 +80,8 @@ const rechercherParNIN = async (req, res) => {
       visiteur: visiteurs[0] || null,
       visiteurs,
       nins: listeNins,
-      ninsList: tableauSimpleNins
+      ninsList: tableauSimpleNins,
+      resultats: visiteurs
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
