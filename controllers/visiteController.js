@@ -60,21 +60,12 @@ const construireFiltrePérimètre = (req) => {
   if (role === 'SUPER_ADMIN' || role === 'SUPERADMIN') {
     if (req.query.entrepriseId) filtre.entrepriseId = req.query.entrepriseId;
     if (req.query.agentId) filtre.agentId = req.query.agentId;
-  } else if (role === 'ADMIN') {
-    const entId = user.entrepriseId?._id || user.entrepriseId;
-    if (entId) filtre.entrepriseId = entId;
-    if (req.query.agentId) filtre.agentId = req.query.agentId;
   } else {
-    // AGENT: voit son propre historique de visites enregistrées ainsi que les visites de sa boîte sans agent explicite
+    // ADMIN et AGENT : cloisonnement strict par entreprise. Seules les visites/RDV de leur propre entreprise sont retournés.
     const entId = user.entrepriseId?._id || user.entrepriseId;
     if (entId) {
       filtre.entrepriseId = entId;
-      filtre.$or = [
-        { agentId: user._id },
-        { agentId: null },
-        { agentId: { $exists: false } }
-      ];
-    } else {
+    } else if (role === 'AGENT') {
       filtre.agentId = user._id;
     }
   }
